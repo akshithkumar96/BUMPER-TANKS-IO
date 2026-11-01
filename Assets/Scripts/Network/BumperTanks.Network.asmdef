@@ -1,0 +1,14 @@
+{
+  "name": "BumperTanks.Network",
+  "rootNamespace": "BumperTanks.Network",
+  "references": ["BumperTanks.Core", "BumperTanks.Match"],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
