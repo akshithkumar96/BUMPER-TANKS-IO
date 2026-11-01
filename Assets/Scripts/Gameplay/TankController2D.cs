@@ -1,5 +1,6 @@
 using BumperTanks.Combat;
 using BumperTanks.Core;
+using BumperTanks.Match;
 using UnityEngine;
 
 namespace BumperTanks.Gameplay
@@ -25,12 +26,16 @@ namespace BumperTanks.Gameplay
         private Vector2 touchOrigin;
         private bool touchSteering;
         private float health = 100f;
+        private float nitroUntil;
+        private float megaBulletUntil;
+        private float magnetUntil;
 
         public bool IsPlayer => playerControlled;
         public Vector2 Position => body.position;
         public Vector2 Aim => aim;
         public float Health => health;
         public TankArchetype Archetype => archetype;
+        public bool HasMagnet => Time.time < magnetUntil;
 
         public void Configure(TankArchetype value, bool isPlayer)
         {
@@ -97,7 +102,8 @@ namespace BumperTanks.Gameplay
 
         private void FixedUpdate()
         {
-            body.linearVelocity = TankMotion.Step(body.linearVelocity, steering, acceleration, tuning.MaxSpeed(baseSpeed), drag, Time.fixedDeltaTime);
+            var speedMultiplier = Time.time < nitroUntil ? 1.5f : 1f;
+            body.linearVelocity = TankMotion.Step(body.linearVelocity, steering, acceleration, tuning.MaxSpeed(baseSpeed) * speedMultiplier, drag, Time.fixedDeltaTime);
             if (body.linearVelocity.sqrMagnitude > 0.01f && !playerControlled)
             {
                 transform.up = body.linearVelocity.normalized;
@@ -117,7 +123,8 @@ namespace BumperTanks.Gameplay
         public bool Fire()
         {
             var velocity = body.linearVelocity;
-            if (!weapon.TryFire(Time.time, body.position, aim, tuning.Mass(baseMass), ref velocity, out var shot)) return false;
+            var impulseMultiplier = Time.time < megaBulletUntil ? 1.8f : 1f;
+            if (!weapon.TryFire(Time.time, body.position, aim, tuning.Mass(baseMass), ref velocity, out var shot, impulseMultiplier)) return false;
             body.linearVelocity = velocity;
             var projectile = new GameObject("Projectile");
             projectile.transform.position = shot.Origin + (shot.Direction * 0.7f);
@@ -146,6 +153,16 @@ namespace BumperTanks.Gameplay
             body.AddForce(impactDirection * knockback, ForceMode2D.Impulse);
             health = Mathf.Max(0f, health - (rearHit ? 25f : 15f));
             if (health <= 0f) gameObject.SetActive(false);
+        }
+
+        public void ApplyPowerUp(PowerUpType powerUp)
+        {
+            switch (powerUp)
+            {
+                case PowerUpType.Nitro: nitroUntil = Time.time + 5f; break;
+                case PowerUpType.MegaBullet: megaBulletUntil = Time.time + 5f; break;
+                case PowerUpType.Magnet: magnetUntil = Time.time + 5f; break;
+            }
         }
     }
 }

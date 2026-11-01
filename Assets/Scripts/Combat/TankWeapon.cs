@@ -21,7 +21,7 @@ namespace BumperTanks.Combat
         public float CooldownSeconds { get; }
         public float RecoilImpulse { get; }
 
-        public bool TryFire(float time, Vector2 position, Vector2 direction, float mass, ref Vector2 velocity, out ShotRequest shot)
+        public bool TryFire(float time, Vector2 position, Vector2 direction, float mass, ref Vector2 velocity, out ShotRequest shot, float impulseMultiplier = 1f)
         {
             shot = default;
             if (time < nextReadyTime || direction.sqrMagnitude <= 0f)
@@ -29,8 +29,9 @@ namespace BumperTanks.Combat
                 return false;
             }
 
-            shot = new ShotRequest(position, direction, RecoilImpulse);
-            velocity = TankMotion.Recoil(velocity, shot.Direction, RecoilImpulse, mass);
+            var impulse = RecoilImpulse * Mathf.Max(0f, impulseMultiplier);
+            shot = new ShotRequest(position, direction, impulse);
+            velocity = TankMotion.Recoil(velocity, shot.Direction, impulse, mass);
             nextReadyTime = time + CooldownSeconds;
             return true;
         }

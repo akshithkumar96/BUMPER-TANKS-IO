@@ -18,6 +18,16 @@ namespace BumperTanks.Gameplay
             heavy.gameObject.AddComponent<BotDriver>();
             var spinner = CreateTank("Ricochet Spinner Bot", new Vector2(4f, 3f), TankArchetype.RicochetSpinner, false, new Color(0.9f, 0.25f, 0.8f));
             spinner.gameObject.AddComponent<BotDriver>();
+            CreatePowerUp(new Vector2(-2.5f, 0f), PowerUpType.Nitro, new Color(1f, 0.9f, 0.1f));
+            CreatePowerUp(new Vector2(0f, 2f), PowerUpType.MegaBullet, new Color(1f, 0.25f, 0.25f));
+            CreatePowerUp(new Vector2(2.5f, 0f), PowerUpType.Magnet, new Color(0.3f, 1f, 0.45f));
+            for (var i = 0; i < 12; i++)
+            {
+                var gem = new GameObject("Gem");
+                gem.transform.position = new Vector2(UnityEngine.Random.Range(-6f, 6f), UnityEngine.Random.Range(-4f, 4f));
+                gem.AddComponent<CircleCollider2D>();
+                gem.AddComponent<GemPickup>();
+            }
         }
 
         private void OnGUI()
@@ -63,6 +73,14 @@ namespace BumperTanks.Gameplay
             var options = new[] { TankArchetype.SpeedyBumper, TankArchetype.HeavyDozer, TankArchetype.RicochetSpinner };
             var archetype = options[UnityEngine.Random.Range(0, options.Length)];
             return CreateTank(name, position, archetype, false, new Color(0.85f, 0.35f, 0.45f));
+        }
+
+        private static void CreatePowerUp(Vector2 position, PowerUpType type, Color color)
+        {
+            var pickup = new GameObject(type.ToString());
+            pickup.transform.position = position;
+            pickup.AddComponent<CircleCollider2D>();
+            pickup.AddComponent<PowerUpPickup>().Configure(type, color);
         }
 
         private static TankController2D CreateTank(string name, Vector2 position, TankArchetype archetype, bool isPlayer, Color color)
