@@ -1,10 +1,19 @@
+using Microsoft.AspNetCore.RateLimiting;
+
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("rewards", limiter =>
+{
+    limiter.PermitLimit = 10;
+    limiter.Window = TimeSpan.FromMinutes(1);
+    limiter.QueueLimit = 0;
+}));
 var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "http://localhost:5173,http://localhost:8080")
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
 var app = builder.Build();
 var profiles = new ProfileRepository(builder.Configuration);
 app.UseCors();
+app.UseRateLimiter();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
@@ -23,7 +32,7 @@ app.MapPost("/v1/rewards/daily", (DailyRewardRequest request) =>
     var updated = profile with { BattleCoins = profile.BattleCoins + 50, LastDailyRewardUtc = today };
     profiles.Save(updated);
     return Results.Ok(updated);
-});
+}).RequireRateLimiting("rewards");
 
 app.MapPost("/v1/matches/complete", (MatchCompleteRequest request) =>
 {
@@ -35,7 +44,7 @@ app.MapPost("/v1/matches/complete", (MatchCompleteRequest request) =>
     var updated = profile with { BattleCoins = profile.BattleCoins + award, MatchesPlayed = profile.MatchesPlayed + 1 };
     profiles.Save(updated);
     return Results.Ok(new { profile = updated, award });
-});
+}).RequireRateLimiting("rewards");
 
 app.MapGet("/v1/leaderboard", () => Results.Ok(profiles.All.OrderByDescending(profile => profile.BattleCoins).Take(50)));
 app.Run();
