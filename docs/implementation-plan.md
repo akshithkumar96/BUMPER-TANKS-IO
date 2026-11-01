@@ -42,7 +42,7 @@ Acceptance criteria: two clients complete a match; movement/projectiles stay wit
 
 Status: networking contracts and an SDK-gated Fusion Shared Mode adapter are in place. SDK import and an AppId remain external account configuration steps.
 
-The client-side snapshot interpolation buffer is implemented and covered by Edit Mode tests; the adapter will feed it from Fusion snapshots after SDK installation.
+Client-side snapshot interpolation and fixed-30-Hz prediction/reconciliation helpers are implemented and covered by Edit Mode tests; the adapter will feed them from Fusion snapshots after SDK installation.
 
 ## Module 5 UX and Progression
 
