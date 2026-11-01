@@ -12,6 +12,7 @@ var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "http://lo
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
 var app = builder.Build();
 var profiles = new ProfileRepository(builder.Configuration);
+var telemetry = new TelemetryRepository(builder.Configuration);
 app.UseCors();
 app.UseRateLimiter();
 
@@ -46,9 +47,18 @@ app.MapPost("/v1/matches/complete", (MatchCompleteRequest request) =>
     return Results.Ok(new { profile = updated, award });
 }).RequireRateLimiting("rewards");
 
+app.MapPost("/v1/telemetry", (TelemetryRequest request) =>
+{
+    if (string.IsNullOrWhiteSpace(request.PlayerId) || string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 64)
+        return Results.BadRequest(new { error = "invalid telemetry event" });
+    telemetry.Track(new TelemetryEvent(request.Name, request.PlayerId, DateTimeOffset.MinValue));
+    return Results.Accepted();
+}).RequireRateLimiting("rewards");
+
 app.MapGet("/v1/leaderboard", () => Results.Ok(profiles.All.OrderByDescending(profile => profile.BattleCoins).Take(50)));
 app.Run();
 
 public sealed record PlayerProfile(string PlayerId, int BattleCoins, int MatchesPlayed, DateOnly LastDailyRewardUtc);
 public sealed record DailyRewardRequest(string PlayerId);
 public sealed record MatchCompleteRequest(string PlayerId, int Gems, int Eliminations);
+public sealed record TelemetryRequest(string PlayerId, string Name);

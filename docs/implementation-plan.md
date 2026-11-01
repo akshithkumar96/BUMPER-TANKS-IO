@@ -26,7 +26,7 @@ Implement a local playable arena with the three GDD archetypes, virtual joystick
 
 Acceptance criteria: each tank is controllable; a released shot applies recoil; collision response differs by mass; rear hits apply 1.5x knockback; ability cooldown behavior is tested.
 
-Status: in progress. The runtime arena, keyboard/mouse control, bots, projectiles, recoil, rear-hit knockback, and initial three abilities are implemented; touch controls and Play Mode verification remain.
+Status: in progress. The runtime arena, keyboard/mouse/touch controls, bots, projectiles, recoil, rear-hit knockback, power-ups, scoring, and initial three abilities are implemented; Play Mode verification remains.
 
 ## Module 3 Match Director and Bots
 

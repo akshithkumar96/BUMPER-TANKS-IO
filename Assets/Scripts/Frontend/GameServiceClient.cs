@@ -28,6 +28,11 @@ namespace BumperTanks.Frontend
             StartCoroutine(PostJson("/v1/rewards/daily", JsonUtility.ToJson(new DailyReward(playerId)), onSuccess, onError));
         }
 
+        public void Track(string playerId, string eventName)
+        {
+            StartCoroutine(PostJson("/v1/telemetry", JsonUtility.ToJson(new Telemetry(playerId, eventName)), null));
+        }
+
         private IEnumerator PostJson(string path, string json, Action<string> onError) => PostJson(path, json, null, onError);
 
         private IEnumerator PostJson(string path, string json, Action onSuccess, Action<string> onError)
@@ -55,6 +60,14 @@ namespace BumperTanks.Frontend
         {
             public string PlayerId;
             public DailyReward(string playerId) => PlayerId = playerId;
+        }
+
+        [Serializable]
+        private sealed class Telemetry
+        {
+            public string PlayerId;
+            public string Name;
+            public Telemetry(string playerId, string name) => (PlayerId, Name) = (playerId, name);
         }
     }
 }

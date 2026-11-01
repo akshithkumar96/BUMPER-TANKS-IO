@@ -16,6 +16,7 @@ namespace BumperTanks.Gameplay
         {
             localPlayerId = ProfileStore.GetOrCreatePlayerId();
             if (FindFirstObjectByType<GameServiceClient>() == null) new GameObject("Game Service Client").AddComponent<GameServiceClient>();
+            StartCoroutine(TrackArenaStarted());
             match = gameObject.AddComponent<MatchDirector>();
             CreateCamera();
             CreateArenaBounds();
@@ -37,6 +38,12 @@ namespace BumperTanks.Gameplay
             }
         }
 
+        private System.Collections.IEnumerator TrackArenaStarted()
+        {
+            yield return null;
+            GameServiceClient.Instance?.Track(localPlayerId, "match_started");
+        }
+
         private void OnGUI()
         {
             GUI.Box(new Rect(12, 12, 345, 92), "BUMPER TANKS IO - Offline Arena");
@@ -55,6 +62,7 @@ namespace BumperTanks.Gameplay
                     if (GUI.Button(new Rect(Screen.width * 0.5f - 80f, Screen.height * 0.5f + 5f, 160f, 36f), "Play Again"))
                     {
                         if (player != null) GameServiceClient.Instance.SubmitMatch(localPlayerId, match.GemsFor(player), match.Scores.EliminationsFor(player.GetInstanceID()));
+                        GameServiceClient.Instance?.Track(localPlayerId, "match_rematch");
                         Time.timeScale = 1f;
                         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
                     }
