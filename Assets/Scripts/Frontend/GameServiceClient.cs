@@ -23,7 +23,14 @@ namespace BumperTanks.Frontend
             StartCoroutine(PostJson("/v1/matches/complete", JsonUtility.ToJson(new MatchResult(playerId, gems, eliminations)), onError));
         }
 
-        private IEnumerator PostJson(string path, string json, Action<string> onError)
+        public void ClaimDailyReward(string playerId, Action onSuccess = null, Action<string> onError = null)
+        {
+            StartCoroutine(PostJson("/v1/rewards/daily", JsonUtility.ToJson(new DailyReward(playerId)), onSuccess, onError));
+        }
+
+        private IEnumerator PostJson(string path, string json, Action<string> onError) => PostJson(path, json, null, onError);
+
+        private IEnumerator PostJson(string path, string json, Action onSuccess, Action<string> onError)
         {
             using var request = new UnityWebRequest(baseUrl.TrimEnd('/') + path, UnityWebRequest.kHttpVerbPOST);
             request.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(json));
@@ -31,6 +38,7 @@ namespace BumperTanks.Frontend
             request.SetRequestHeader("Content-Type", "application/json");
             yield return request.SendWebRequest();
             if (request.result != UnityWebRequest.Result.Success) onError?.Invoke(request.error);
+            else onSuccess?.Invoke();
         }
 
         [Serializable]
@@ -40,6 +48,13 @@ namespace BumperTanks.Frontend
             public int Gems;
             public int Eliminations;
             public MatchResult(string playerId, int gems, int eliminations) => (PlayerId, Gems, Eliminations) = (playerId, gems, eliminations);
+        }
+
+        [Serializable]
+        private sealed class DailyReward
+        {
+            public string PlayerId;
+            public DailyReward(string playerId) => PlayerId = playerId;
         }
     }
 }

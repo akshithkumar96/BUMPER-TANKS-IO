@@ -8,10 +8,12 @@ namespace BumperTanks.Gameplay
         private bool open;
         private PlayerProfile profile;
         private TankController2D player;
+        private string playerId;
 
         private void Start()
         {
             profile = ProfileStore.Load();
+            playerId = ProfileStore.GetOrCreatePlayerId();
             player = FindFirstObjectByType<TankController2D>();
             ApplyColor();
         }
@@ -24,11 +26,20 @@ namespace BumperTanks.Gameplay
         private void OnGUI()
         {
             if (!open) return;
-            GUI.Box(new Rect(Screen.width - 210, 12, 198, 172), "Garage");
+            GUI.Box(new Rect(Screen.width - 210, 12, 198, 210), "Garage");
             GUI.Label(new Rect(Screen.width - 195, 42, 170, 20), "Choose tank color");
             ColorButton("sky", new Color(0.15f, 0.75f, 1f), 70);
             ColorButton("coral", new Color(1f, 0.35f, 0.3f), 105);
             ColorButton("lime", new Color(0.35f, 1f, 0.45f), 140);
+            if (GUI.Button(new Rect(Screen.width - 190, 170, 156, 26), "Claim daily 50 coins"))
+            {
+                GameServiceClient.Instance?.ClaimDailyReward(playerId, () =>
+                {
+                    profile.DailySpinDay = System.DateTime.UtcNow.DayOfYear;
+                    profile.BattleCoins += 50;
+                    ProfileStore.Save(profile);
+                });
+            }
         }
 
         private void ColorButton(string id, Color color, float y)
