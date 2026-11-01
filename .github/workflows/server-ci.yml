@@ -22,8 +22,13 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: dotnet build BumperTanks.Server.csproj --configuration Release
-      - name: Start service and check health
+      - name: Start service and verify health and rewards
         run: |
           dotnet run --no-build --configuration Release --urls http://127.0.0.1:5188 &
-          for i in {1..10}; do curl --fail --silent http://127.0.0.1:5188/health && exit 0; sleep 1; done
-          exit 1
+          healthy=false
+          for i in {1..10}; do if curl --fail --silent http://127.0.0.1:5188/health; then healthy=true; break; fi; sleep 1; done
+          test "$healthy" = true
+          curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/rewards/daily -H 'Content-Type: application/json' -d '{"playerId":"ci-player"}'
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/rewards/daily -H 'Content-Type: application/json' -d '{"playerId":"ci-player"}')
+          test "$status" = "409"
+          curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -d '{"playerId":"ci-player","gems":7,"eliminations":2}'
