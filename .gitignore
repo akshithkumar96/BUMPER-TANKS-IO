@@ -109,3 +109,7 @@ InitTestScene*.unity*
 /[Aa]ssets/[Ss]ceneDependencyCache*
 # Product reference material is kept locally; extracted requirements live in docs/.
 Bumper Tanks IO - Game Design Document.pdf
+
+# .NET build output for the standalone game service
+/Server/bin/
+/Server/obj/
