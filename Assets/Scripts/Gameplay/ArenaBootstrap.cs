@@ -19,6 +19,7 @@ namespace BumperTanks.Gameplay
             CreateCamera();
             CreateArenaBounds();
             player = CreateTank("Player Speedy Bumper", new Vector2(0f, -3f), TankArchetype.SpeedyBumper, true, new Color(0.15f, 0.75f, 1f));
+            gameObject.AddComponent<GarageOverlay>();
             var heavy = CreateTank("Heavy Dozer Bot", new Vector2(-4f, 3f), TankArchetype.HeavyDozer, false, new Color(1f, 0.55f, 0.15f));
             heavy.gameObject.AddComponent<BotDriver>();
             var spinner = CreateTank("Ricochet Spinner Bot", new Vector2(4f, 3f), TankArchetype.RicochetSpinner, false, new Color(0.9f, 0.25f, 0.8f));
@@ -38,7 +39,7 @@ namespace BumperTanks.Gameplay
         private void OnGUI()
         {
             GUI.Box(new Rect(12, 12, 345, 92), "BUMPER TANKS IO - Offline Arena");
-            GUI.Label(new Rect(25, 40, 320, 24), "Desktop: WASD/arrows, mouse, click release, E | Mobile: left drag, right release");
+            GUI.Label(new Rect(25, 40, 320, 24), "Desktop: WASD/arrows, mouse, click release, E, G garage | Mobile: left drag, right release");
             GUI.Label(new Rect(25, 66, 320, 24), player != null ? $"{player.Archetype}  Health: {player.Health:0}" : "Player eliminated");
             if (match != null)
             {
