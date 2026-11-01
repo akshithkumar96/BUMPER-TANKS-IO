@@ -13,7 +13,7 @@ namespace BumperTanks.Gameplay
 
         private void Awake()
         {
-            localPlayerId = SystemInfo.deviceUniqueIdentifier;
+            localPlayerId = ProfileStore.GetOrCreatePlayerId();
             if (FindFirstObjectByType<GameServiceClient>() == null) new GameObject("Game Service Client").AddComponent<GameServiceClient>();
             match = gameObject.AddComponent<MatchDirector>();
             CreateCamera();

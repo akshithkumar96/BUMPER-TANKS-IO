@@ -15,6 +15,17 @@ namespace BumperTanks.Frontend
     public static class ProfileStore
     {
         private const string ProfileKey = "bumper-tanks.profile.v1";
+        private const string PlayerIdKey = "bumper-tanks.player-id.v1";
+
+        public static string GetOrCreatePlayerId()
+        {
+            var playerId = PlayerPrefs.GetString(PlayerIdKey, string.Empty);
+            if (!string.IsNullOrWhiteSpace(playerId)) return playerId;
+            playerId = Guid.NewGuid().ToString("N");
+            PlayerPrefs.SetString(PlayerIdKey, playerId);
+            PlayerPrefs.Save();
+            return playerId;
+        }
 
         public static PlayerProfile Load()
         {
