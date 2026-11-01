@@ -42,6 +42,7 @@ namespace BumperTanks.Gameplay
             GUI.Box(new Rect(12, 12, 345, 92), "BUMPER TANKS IO - Offline Arena");
             GUI.Label(new Rect(25, 40, 320, 24), "Desktop: WASD/arrows, mouse, click release, E, G garage | Mobile: left drag, right release");
             GUI.Label(new Rect(25, 66, 320, 24), player != null ? $"{player.Archetype}  Health: {player.Health:0}" : "Player eliminated");
+            GUI.Label(new Rect(25, 108, 320, 24), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
             if (match != null)
             {
                 var gems = player != null ? match.GemsFor(player) : 0;
