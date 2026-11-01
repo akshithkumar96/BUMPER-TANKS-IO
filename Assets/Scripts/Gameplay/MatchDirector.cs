@@ -5,6 +5,7 @@ namespace BumperTanks.Gameplay
 {
     public sealed class MatchDirector : MonoBehaviour
     {
+        public static MatchDirector Instance { get; private set; }
         private float startedAt;
         private MatchPhase phase;
         private int collapseSteps;
@@ -20,7 +21,23 @@ namespace BumperTanks.Gameplay
         public ScoreService Scores => scores;
         public int RemainingPlayers => FindObjectsByType<TankController2D>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).Length;
 
-        private void Awake() => startedAt = Time.time;
+        private void Awake()
+        {
+            Instance = this;
+            startedAt = Time.time;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this) Instance = null;
+        }
+
+        public void AwardGem(TankController2D tank)
+        {
+            Scores.AwardGem(tank.GetInstanceID(), MatchRules.GemMultiplier(Elapsed));
+        }
+
+        public int GemsFor(TankController2D tank) => Scores.GemsFor(tank.GetInstanceID());
 
         private void Update()
         {

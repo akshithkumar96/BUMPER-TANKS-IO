@@ -25,7 +25,10 @@ namespace BumperTanks.Gameplay
 
         private void OnTriggerEnter2D(Collider2D other)
         {
-            if (other.GetComponent<TankController2D>() != null) Destroy(gameObject);
+            var tank = other.GetComponent<TankController2D>();
+            if (tank == null) return;
+            MatchDirector.Instance?.AwardGem(tank);
+            Destroy(gameObject);
         }
     }
 }
