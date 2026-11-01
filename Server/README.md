@@ -6,6 +6,8 @@ Endpoints: `GET /health`, `GET /v1/profiles/{playerId}`, `POST /v1/rewards/daily
 
 This service uses in-memory storage for local development. Production deployment must replace it with authenticated persistent storage and verify match outcomes from the multiplayer authority before awarding currency.
 
+Profile data is persisted locally in `data/profiles.json`; override this with `Storage__ProfilePath` for a mounted volume.
+
 ## Container deployment
 
 Build with `docker build -t bumper-tanks-service Server`. Run with `docker run -p 8080:8080 -e Cors__AllowedOrigins=https://your-game.example bumper-tanks-service`.
