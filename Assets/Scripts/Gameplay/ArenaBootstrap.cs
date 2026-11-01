@@ -6,10 +6,11 @@ namespace BumperTanks.Gameplay
     public sealed class ArenaBootstrap : MonoBehaviour
     {
         private TankController2D player;
+        private MatchDirector match;
 
         private void Awake()
         {
-            gameObject.AddComponent<MatchDirector>();
+            match = gameObject.AddComponent<MatchDirector>();
             CreateCamera();
             CreateArenaBounds();
             player = CreateTank("Player Speedy Bumper", new Vector2(0f, -3f), TankArchetype.SpeedyBumper, true, new Color(0.15f, 0.75f, 1f));
@@ -24,6 +25,7 @@ namespace BumperTanks.Gameplay
             GUI.Box(new Rect(12, 12, 345, 92), "BUMPER TANKS IO - Offline Arena");
             GUI.Label(new Rect(25, 40, 320, 24), "Desktop: WASD/arrows, mouse, click release, E | Mobile: left drag, right release");
             GUI.Label(new Rect(25, 66, 320, 24), player != null ? $"{player.Archetype}  Health: {player.Health:0}" : "Player eliminated");
+            if (match != null) GUI.Label(new Rect(25, 87, 320, 24), $"{match.Phase}  {Mathf.CeilToInt(90f - match.Elapsed):0}s  Tanks: {match.RemainingPlayers}");
         }
 
         private static void CreateCamera()

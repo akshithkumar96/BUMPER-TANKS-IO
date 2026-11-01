@@ -18,6 +18,7 @@ namespace BumperTanks.Gameplay
         public int CollapseSteps => collapseSteps;
         public TankController2D Winner => winner;
         public ScoreService Scores => scores;
+        public int RemainingPlayers => FindObjectsByType<TankController2D>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).Length;
 
         private void Awake() => startedAt = Time.time;
 
