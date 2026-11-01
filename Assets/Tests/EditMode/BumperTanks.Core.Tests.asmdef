@@ -1,7 +1,7 @@
 {
   "name": "BumperTanks.Core.Tests",
   "rootNamespace": "BumperTanks.Tests",
-  "references": ["BumperTanks.Core", "BumperTanks.Combat"],
+  "references": ["BumperTanks.Core", "BumperTanks.Combat", "BumperTanks.Match"],
   "includePlatforms": ["Editor"],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

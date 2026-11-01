@@ -9,6 +9,7 @@ namespace BumperTanks.Gameplay
 
         private void Awake()
         {
+            gameObject.AddComponent<MatchDirector>();
             CreateCamera();
             CreateArenaBounds();
             player = CreateTank("Player Speedy Bumper", new Vector2(0f, -3f), TankArchetype.SpeedyBumper, true, new Color(0.15f, 0.75f, 1f));
@@ -53,6 +54,13 @@ namespace BumperTanks.Gameplay
             sprite.sprite = RuntimeSprite.White;
             sprite.color = new Color(0.18f, 0.27f, 0.37f);
             wall.AddComponent<BoxCollider2D>();
+        }
+
+        public static TankController2D CreateBot(string name, Vector2 position)
+        {
+            var options = new[] { TankArchetype.SpeedyBumper, TankArchetype.HeavyDozer, TankArchetype.RicochetSpinner };
+            var archetype = options[UnityEngine.Random.Range(0, options.Length)];
+            return CreateTank(name, position, archetype, false, new Color(0.85f, 0.35f, 0.45f));
         }
 
         private static TankController2D CreateTank(string name, Vector2 position, TankArchetype archetype, bool isPlayer, Color color)

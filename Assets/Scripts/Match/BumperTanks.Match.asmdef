@@ -1,0 +1,14 @@
+{
+  "name": "BumperTanks.Match",
+  "rootNamespace": "BumperTanks.Match",
+  "references": ["BumperTanks.Core"],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
