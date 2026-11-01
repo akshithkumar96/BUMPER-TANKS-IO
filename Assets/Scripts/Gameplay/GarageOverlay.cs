@@ -1,7 +1,7 @@
-using BumperTanks.Gameplay;
+using BumperTanks.Frontend;
 using UnityEngine;
 
-namespace BumperTanks.Frontend
+namespace BumperTanks.Gameplay
 {
     public sealed class GarageOverlay : MonoBehaviour
     {
