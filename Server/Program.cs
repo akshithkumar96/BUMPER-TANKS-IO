@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "http://localhost:5173,http://localhost:8080")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
 var app = builder.Build();
 var profiles = new ConcurrentDictionary<string, PlayerProfile>();
 app.UseCors();
