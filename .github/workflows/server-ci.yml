@@ -1,0 +1,29 @@
+name: Server CI
+
+on:
+  push:
+    paths:
+      - 'Server/**'
+      - '.github/workflows/server-ci.yml'
+  pull_request:
+    paths:
+      - 'Server/**'
+      - '.github/workflows/server-ci.yml'
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build BumperTanks.Server.csproj --configuration Release
+      - name: Start service and check health
+        run: |
+          dotnet run --no-build --configuration Release --urls http://127.0.0.1:5188 &
+          for i in {1..10}; do curl --fail --silent http://127.0.0.1:5188/health && exit 0; sleep 1; done
+          exit 1
