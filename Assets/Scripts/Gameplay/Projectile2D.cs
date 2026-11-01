@@ -9,9 +9,11 @@ namespace BumperTanks.Gameplay
         private float impulse;
         private float expiresAt;
         private Rigidbody2D body;
+        private TankController2D owner;
 
-        public void Launch(Vector2 direction, float projectileSpeed, float knockbackImpulse, float lifetime)
+        public void Launch(TankController2D firingTank, Vector2 direction, float projectileSpeed, float knockbackImpulse, float lifetime)
         {
+            owner = firingTank;
             body = GetComponent<Rigidbody2D>();
             impulse = knockbackImpulse;
             expiresAt = Time.time + lifetime;
@@ -26,11 +28,16 @@ namespace BumperTanks.Gameplay
         private void OnTriggerEnter2D(Collider2D other)
         {
             var tank = other.GetComponent<TankController2D>();
-            if (tank != null)
+            if (tank != null && tank != owner)
             {
-                tank.ApplyProjectileImpact(transform.position, body.linearVelocity.normalized, impulse);
+                if (tank.ApplyProjectileImpact(transform.position, body.linearVelocity.normalized, impulse))
+                {
+                    MatchDirector.Instance?.AwardElimination(owner);
+                }
+                Destroy(gameObject);
+                return;
             }
-            Destroy(gameObject);
+            if (tank == null) Destroy(gameObject);
         }
     }
 }

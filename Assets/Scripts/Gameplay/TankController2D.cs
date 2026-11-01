@@ -136,23 +136,25 @@ namespace BumperTanks.Gameplay
             var projectileBody = projectile.AddComponent<Rigidbody2D>();
             projectileBody.gravityScale = 0f;
             projectileBody.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
-            projectile.AddComponent<Projectile2D>().Launch(shot.Direction, projectileSpeed, shot.Impulse, 2.5f);
+            projectile.AddComponent<Projectile2D>().Launch(this, shot.Direction, projectileSpeed, shot.Impulse, 2.5f);
             return true;
         }
 
-        public void ApplyProjectileImpact(Vector2 impactPoint, Vector2 impactDirection, float impulse)
+        public bool ApplyProjectileImpact(Vector2 impactPoint, Vector2 impactDirection, float impulse)
         {
             var ability = GetComponent<TankAbilityController>();
             if (ability != null && ability.ShieldActive)
             {
                 body.AddForce(impactDirection * (impulse * 0.25f), ForceMode2D.Impulse);
-                return;
+                return false;
             }
             var rearHit = CombatMath.IsRearHit(aim, impactDirection);
             var knockback = CombatMath.Knockback(impulse, tuning.Mass(baseMass), rearHit);
             body.AddForce(impactDirection * knockback, ForceMode2D.Impulse);
             health = Mathf.Max(0f, health - (rearHit ? 25f : 15f));
-            if (health <= 0f) gameObject.SetActive(false);
+            var eliminated = health <= 0f;
+            if (eliminated) gameObject.SetActive(false);
+            return eliminated;
         }
 
         public void ApplyPowerUp(PowerUpType powerUp)

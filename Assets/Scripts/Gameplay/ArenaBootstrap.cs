@@ -45,14 +45,15 @@ namespace BumperTanks.Gameplay
             if (match != null)
             {
                 var gems = player != null ? match.GemsFor(player) : 0;
-                GUI.Label(new Rect(25, 87, 320, 24), $"{match.Phase}  {Mathf.CeilToInt(90f - match.Elapsed):0}s  Tanks: {match.RemainingPlayers}  Gems: {gems}");
+                var eliminations = player != null ? match.Scores.EliminationsFor(player.GetInstanceID()) : 0;
+                GUI.Label(new Rect(25, 87, 320, 24), $"{match.Phase}  {Mathf.CeilToInt(90f - match.Elapsed):0}s  Tanks: {match.RemainingPlayers}  Gems: {gems}  KOs: {eliminations}");
                 if (match.Winner != null || match.Phase == BumperTanks.Match.MatchPhase.Complete)
                 {
                     var label = match.Winner != null ? $"Winner: {match.Winner.name}" : "Time up";
                     GUI.Box(new Rect(Screen.width * 0.5f - 145f, Screen.height * 0.5f - 70f, 290f, 140f), label);
                     if (GUI.Button(new Rect(Screen.width * 0.5f - 80f, Screen.height * 0.5f + 5f, 160f, 36f), "Play Again"))
                     {
-                        if (player != null) GameServiceClient.Instance.SubmitMatch(localPlayerId, match.GemsFor(player), 0);
+                        if (player != null) GameServiceClient.Instance.SubmitMatch(localPlayerId, match.GemsFor(player), match.Scores.EliminationsFor(player.GetInstanceID()));
                         Time.timeScale = 1f;
                         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
                     }

@@ -39,6 +39,11 @@ namespace BumperTanks.Gameplay
 
         public int GemsFor(TankController2D tank) => Scores.GemsFor(tank.GetInstanceID());
 
+        public void AwardElimination(TankController2D tank)
+        {
+            if (tank != null) Scores.AwardElimination(tank.GetInstanceID());
+        }
+
         private void Update()
         {
             phase = MatchRules.PhaseAt(Elapsed);
