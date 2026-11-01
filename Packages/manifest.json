@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "com.unity.collab-proxy": "2.10.2",
+    "com.unity.feature.2d": "2.0.0",
+    "com.unity.inputsystem": "1.14.2",
+    "com.unity.modules.physics2d": "1.0.0",
+    "com.unity.modules.uielements": "1.0.0",
+    "com.unity.render-pipelines.universal": "17.3.0"
+  }
+}
