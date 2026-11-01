@@ -40,6 +40,8 @@ Integrate Photon Fusion Shared Mode: matchmaking target under three seconds, bot
 
 Acceptance criteria: two clients complete a match; movement/projectiles stay within agreed error tolerances at simulated latency; no secrets are committed.
 
+Status: networking contracts and an SDK-gated Fusion Shared Mode adapter are in place. SDK import and an AppId remain external account configuration steps.
+
 ## Module 5 UX and Progression
 
 Create menu, matchmaking, HUD, results screen, accessibility controls, cosmetic garage, local persistence, battle coins, and daily-spin flow.
