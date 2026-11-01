@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 var app = builder.Build();
 var profiles = new ConcurrentDictionary<string, PlayerProfile>();
+app.UseCors();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 

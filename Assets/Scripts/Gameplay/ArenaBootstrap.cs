@@ -1,6 +1,7 @@
 using BumperTanks.Core;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using BumperTanks.Frontend;
 
 namespace BumperTanks.Gameplay
 {
@@ -8,9 +9,12 @@ namespace BumperTanks.Gameplay
     {
         private TankController2D player;
         private MatchDirector match;
+        private string localPlayerId;
 
         private void Awake()
         {
+            localPlayerId = SystemInfo.deviceUniqueIdentifier;
+            if (FindFirstObjectByType<GameServiceClient>() == null) new GameObject("Game Service Client").AddComponent<GameServiceClient>();
             match = gameObject.AddComponent<MatchDirector>();
             CreateCamera();
             CreateArenaBounds();
@@ -46,6 +50,7 @@ namespace BumperTanks.Gameplay
                     GUI.Box(new Rect(Screen.width * 0.5f - 145f, Screen.height * 0.5f - 70f, 290f, 140f), label);
                     if (GUI.Button(new Rect(Screen.width * 0.5f - 80f, Screen.height * 0.5f + 5f, 160f, 36f), "Play Again"))
                     {
+                        if (player != null) GameServiceClient.Instance.SubmitMatch(localPlayerId, match.GemsFor(player), 0);
                         Time.timeScale = 1f;
                         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
                     }
