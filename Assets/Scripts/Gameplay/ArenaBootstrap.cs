@@ -50,6 +50,11 @@ namespace BumperTanks.Gameplay
             GUI.Label(new Rect(25, 40, 320, 24), "Desktop: WASD/arrows, mouse, click release, E, G garage | Mobile: left drag, right release");
             GUI.Label(new Rect(25, 66, 320, 24), player != null ? $"{player.Archetype}  Health: {player.Health:0}" : "Player eliminated");
             GUI.Label(new Rect(25, 108, 320, 24), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
+            if (player != null)
+            {
+                var ability = player.GetComponent<TankAbilityController>();
+                if (ability != null) GUI.Label(new Rect(25, 129, 320, 24), ability.ReadyIn <= 0f ? "Ability ready (E)" : $"Ability cooldown: {ability.ReadyIn:0.0}s");
+            }
             if (match != null)
             {
                 var gems = player != null ? match.GemsFor(player) : 0;

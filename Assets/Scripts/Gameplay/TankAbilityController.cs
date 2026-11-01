@@ -12,6 +12,7 @@ namespace BumperTanks.Gameplay
         private bool shieldActive;
 
         public bool ShieldActive => shieldActive;
+        public float ReadyIn => Mathf.Max(0f, readyAt - Time.time);
 
         private void Awake()
         {
