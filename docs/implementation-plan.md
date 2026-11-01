@@ -18,11 +18,15 @@ Acceptance criteria: Unity opens the project on 6000.3.8f1; the Edit Mode test s
 
 Commit: `feat(foundation): bootstrap Unity tank simulation core`
 
+Status: complete and pushed as `3a6c003`.
+
 ## Module 2 Offline Combat Vertical Slice
 
 Implement a local playable arena with the three GDD archetypes, virtual joystick and mouse controls, projectile recoil, vehicle impulses, rear-hit multiplier, and abilities.
 
 Acceptance criteria: each tank is controllable; a released shot applies recoil; collision response differs by mass; rear hits apply 1.5x knockback; ability cooldown behavior is tested.
+
+Status: in progress. The runtime arena, keyboard/mouse control, bots, projectiles, recoil, rear-hit knockback, and initial three abilities are implemented; touch controls and Play Mode verification remain.
 
 ## Module 3 Match Director and Bots
 

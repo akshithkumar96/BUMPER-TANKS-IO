@@ -1,0 +1,14 @@
+{
+  "name": "BumperTanks.Gameplay",
+  "rootNamespace": "BumperTanks.Gameplay",
+  "references": ["BumperTanks.Core", "BumperTanks.Combat"],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
