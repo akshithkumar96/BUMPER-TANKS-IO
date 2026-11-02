@@ -18,7 +18,6 @@ namespace BumperTanks.Gameplay
             localPlayerId = ProfileStore.GetOrCreatePlayerId();
             Time.timeScale = 0f;
             if (FindFirstObjectByType<GameServiceClient>() == null) new GameObject("Game Service Client").AddComponent<GameServiceClient>();
-            StartCoroutine(TrackArenaStarted());
             match = gameObject.AddComponent<MatchDirector>();
             CreateCamera();
             CreateArenaBounds();

@@ -50,7 +50,7 @@ Create menu, matchmaking, HUD, results screen, accessibility controls, cosmetic 
 
 Acceptance criteria: full menu-to-rematch journey works on touch and mouse; cosmetics persist; essential UI is screen-reader and contrast reviewed.
 
-Status: local arena HUD, result/rematch, color garage, daily reward, battle coins, and leaderboard are implemented. A real front menu, accessible UI review, and device-scale UX pass remain.
+Status: front menu, local arena HUD, result/rematch, color garage, daily reward, battle coins, and leaderboard are implemented. Garage and scores open from the menu and return to it while pausing the arena. Accessible UI review, matchmaking UI, and device-scale UX pass remain.
 
 ## Module 6 Live Operations
 
