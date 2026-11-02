@@ -19,6 +19,10 @@ namespace BumperTanks.Tests
             Assert.That(heavy.MassMultiplier, Is.EqualTo(1.5f));
             Assert.That(spinner.SpeedMultiplier, Is.EqualTo(1f));
             Assert.That(spinner.MassMultiplier, Is.EqualTo(1f));
+            Assert.That(speedy.ProjectileCooldownMultiplier, Is.LessThan(heavy.ProjectileCooldownMultiplier));
+            Assert.That(speedy.ProjectileSpeedMultiplier, Is.GreaterThan(heavy.ProjectileSpeedMultiplier));
+            Assert.That(heavy.ShotKnockbackMultiplier, Is.GreaterThan(speedy.ShotKnockbackMultiplier));
+            Assert.That(spinner.ProjectileBounces, Is.EqualTo(3));
         }
 
         [Test]

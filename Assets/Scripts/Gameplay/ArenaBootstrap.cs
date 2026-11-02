@@ -80,7 +80,13 @@ namespace BumperTanks.Gameplay
             if (player != null)
             {
                 var ability = player.GetComponent<TankAbilityController>();
-                if (ability != null) GUI.Label(new Rect(25, 129, 320, 24), ability.ReadyIn <= 0f ? "Ability ready (E)" : $"Ability cooldown: {ability.ReadyIn:0.0}s");
+                if (ability != null)
+                {
+                    GUI.Label(new Rect(25, 129, 320, 24), ability.ReadyIn <= 0f ? "Ability ready (E)" : $"Ability cooldown: {ability.ReadyIn:0.0}s");
+                    if (player.gameObject.activeInHierarchy && match != null && match.Phase != MatchPhase.Complete && match.Winner == null &&
+                        GUI.Button(new Rect(Mathf.Max(12f, Screen.width - 148f), Screen.height - 72f, 136f, 60f), ability.ReadyIn <= 0f ? "ABILITY (E)" : $"READY IN {ability.ReadyIn:0.0}s"))
+                        ability.Activate();
+                }
             }
             if (match != null)
             {

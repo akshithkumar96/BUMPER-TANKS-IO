@@ -1,4 +1,5 @@
 using BumperTanks.Core;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace BumperTanks.Gameplay
@@ -10,8 +11,12 @@ namespace BumperTanks.Gameplay
         private Rigidbody2D body;
         private float readyAt;
         private bool shieldActive;
+        private float whirlwindEndsAt;
+        private readonly HashSet<int> deflectedProjectiles = new();
+        private readonly HashSet<int> knockedTanks = new();
 
         public bool ShieldActive => shieldActive;
+        public bool Whirling => Time.time < whirlwindEndsAt;
         public float ReadyIn => Mathf.Max(0f, readyAt - Time.time);
 
         private void Awake()
@@ -22,7 +27,10 @@ namespace BumperTanks.Gameplay
 
         private void Update()
         {
-            if (tank.IsPlayer && Input.GetKeyDown(KeyCode.E)) Activate();
+            if (Time.timeScale > 0f && tank.IsPlayer && Input.GetKeyDown(KeyCode.E)) Activate();
+            if (!Whirling) return;
+            transform.Rotate(0f, 0f, 1440f * Time.deltaTime);
+            ApplyWhirlwind();
         }
 
         public bool Activate()
@@ -32,6 +40,7 @@ namespace BumperTanks.Gameplay
             {
                 case TankArchetype.SpeedyBumper:
                     body.AddForce(tank.Aim * 14f, ForceMode2D.Impulse);
+                    tank.BeginDash(0.4f);
                     readyAt = Time.time + 4f;
                     break;
                 case TankArchetype.HeavyDozer:
@@ -39,8 +48,11 @@ namespace BumperTanks.Gameplay
                     readyAt = Time.time + 7f;
                     break;
                 case TankArchetype.RicochetSpinner:
-                    DeflectProjectiles();
+                    whirlwindEndsAt = Time.time + 2f;
+                    deflectedProjectiles.Clear();
+                    knockedTanks.Clear();
                     readyAt = Time.time + 5f;
+                    ApplyWhirlwind();
                     break;
                 default:
                     return false;
@@ -55,16 +67,22 @@ namespace BumperTanks.Gameplay
             shieldActive = false;
         }
 
-        private void DeflectProjectiles()
+        private void ApplyWhirlwind()
         {
             foreach (var hit in Physics2D.OverlapCircleAll(transform.position, 2.5f))
             {
                 var projectile = hit.GetComponent<Projectile2D>();
-                var projectileBody = hit.attachedRigidbody;
-                if (projectile != null && projectileBody != null)
+                if (projectile != null && deflectedProjectiles.Add(projectile.GetInstanceID()))
                 {
-                    projectileBody.linearVelocity = (hit.transform.position - transform.position).normalized * projectileBody.linearVelocity.magnitude;
+                    var direction = ((Vector2)hit.transform.position - (Vector2)transform.position).normalized;
+                    projectile.Deflect(tank, direction, 1f);
+                    continue;
                 }
+
+                var foe = hit.GetComponent<TankController2D>();
+                if (foe == null || foe == tank || !knockedTanks.Add(foe.GetInstanceID())) continue;
+                var away = (foe.Position - tank.Position).normalized;
+                foe.ApplyCollisionKnockback(away, foe.GetComponent<Rigidbody2D>().mass * 6f);
             }
         }
     }

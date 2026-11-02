@@ -21,6 +21,7 @@ namespace BumperTanks.Gameplay
         private Rigidbody2D body;
         private TankWeapon weapon;
         private TankTuning tuning;
+        private LineRenderer aimTrajectory;
         private Vector2 steering;
         private Vector2 aim = Vector2.up;
         private Vector2 touchOrigin;
@@ -30,6 +31,7 @@ namespace BumperTanks.Gameplay
         private float nitroUntil;
         private float megaBulletUntil;
         private float magnetUntil;
+        private float dashUntil;
 
         public bool IsPlayer => playerControlled;
         public Vector2 Position => body.position;
@@ -37,6 +39,8 @@ namespace BumperTanks.Gameplay
         public float Health => health;
         public TankArchetype Archetype => archetype;
         public bool HasMagnet => Time.time < magnetUntil;
+        public bool IsDashing => Time.time < dashUntil;
+        public float BumpKnockbackMultiplier => IsDashing ? 2.5f : 1f;
 
         public void Configure(TankArchetype value, bool isPlayer)
         {
@@ -53,7 +57,20 @@ namespace BumperTanks.Gameplay
             body.linearDamping = 0f;
             tuning = TankTuning.For(archetype);
             body.mass = tuning.Mass(baseMass);
-            weapon = new TankWeapon(projectileCooldown, projectileImpulse);
+            weapon = new TankWeapon(projectileCooldown * tuning.ProjectileCooldownMultiplier,
+                projectileImpulse * tuning.ShotKnockbackMultiplier);
+            var trajectory = new GameObject("Aim Trajectory");
+            trajectory.transform.SetParent(transform, false);
+            aimTrajectory = trajectory.AddComponent<LineRenderer>();
+            var shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Sprites/Default");
+            if (shader != null) aimTrajectory.material = new Material(shader);
+            aimTrajectory.positionCount = 2;
+            aimTrajectory.startWidth = 0.035f;
+            aimTrajectory.endWidth = 0.012f;
+            aimTrajectory.startColor = new Color(0.35f, 0.95f, 1f, 0.9f);
+            aimTrajectory.endColor = new Color(0.35f, 0.95f, 1f, 0.05f);
+            aimTrajectory.sortingOrder = 2;
+            aimTrajectory.enabled = false;
         }
 
         private void Update()
@@ -67,7 +84,20 @@ namespace BumperTanks.Gameplay
             {
                 ReadDesktopInput();
             }
-            if (aim.sqrMagnitude > 0f) transform.up = aim;
+            var ability = GetComponent<TankAbilityController>();
+            if (ability == null || !ability.Whirling)
+                if (aim.sqrMagnitude > 0f) transform.up = aim;
+            UpdateAimTrajectory(Input.touchCount > 0 ? aimFingerId >= 0 : Input.GetMouseButton(0));
+        }
+
+        private void UpdateAimTrajectory(bool aiming)
+        {
+            if (aimTrajectory == null) return;
+            aimTrajectory.enabled = aiming && aim.sqrMagnitude > 0f;
+            if (!aimTrajectory.enabled) return;
+            var origin = body.position + aim * 0.65f;
+            aimTrajectory.SetPosition(0, origin);
+            aimTrajectory.SetPosition(1, origin + aim * 3.5f);
         }
 
         private void ReadDesktopInput()
@@ -147,7 +177,7 @@ namespace BumperTanks.Gameplay
             body.linearVelocity = velocity;
             var projectile = new GameObject("Projectile");
             projectile.transform.position = shot.Origin + (shot.Direction * 0.7f);
-            projectile.transform.localScale = Vector3.one * 0.22f;
+            projectile.transform.localScale = Vector3.one * (0.22f * tuning.ProjectileSizeMultiplier);
             projectile.AddComponent<SpriteRenderer>().sprite = RuntimeSprite.White;
             projectile.GetComponent<SpriteRenderer>().color = playerControlled ? new Color(0.2f, 0.9f, 1f) : new Color(1f, 0.4f, 0.2f);
             var collider = projectile.AddComponent<CircleCollider2D>();
@@ -155,18 +185,27 @@ namespace BumperTanks.Gameplay
             var projectileBody = projectile.AddComponent<Rigidbody2D>();
             projectileBody.gravityScale = 0f;
             projectileBody.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
-            projectile.AddComponent<Projectile2D>().Launch(this, shot.Direction, projectileSpeed, shot.Impulse, 2.5f);
+            projectile.AddComponent<Projectile2D>().Launch(this, shot.Direction,
+                projectileSpeed * tuning.ProjectileSpeedMultiplier, shot.Impulse, 2.5f, tuning.ProjectileBounces);
             return true;
         }
 
-        public bool ApplyProjectileImpact(Vector2 impactPoint, Vector2 impactDirection, float impulse)
+        public ProjectileHitResult ApplyProjectileImpact(Projectile2D projectile, TankController2D attacker, Vector2 impactDirection, float impulse)
         {
             var ability = GetComponent<TankAbilityController>();
-            if (ability != null && ability.ShieldActive)
+            if (ability != null && ability.ShieldActive && CombatMath.IsFrontHit(aim, impactDirection))
             {
-                body.AddForce(impactDirection * (impulse * 0.25f), ForceMode2D.Impulse);
-                return false;
+                attacker?.ApplyCollisionKnockback(-impactDirection, impulse * 0.5f);
+                projectile.Deflect(this, -impactDirection, 0.5f);
+                return ProjectileHitResult.Deflected;
             }
+            if (ability != null && ability.Whirling)
+            {
+                var away = ((Vector2)projectile.transform.position - body.position).normalized;
+                projectile.Deflect(this, away, 1f);
+                return ProjectileHitResult.Deflected;
+            }
+
             var flankHit = CombatMath.IsFlankHit(aim, impactDirection);
             var elapsed = MatchDirector.Instance != null ? MatchDirector.Instance.Elapsed : 0f;
             var knockback = CombatMath.Knockback(impulse, tuning.Mass(baseMass), flankHit, MatchRules.KnockbackMultiplier(elapsed));
@@ -174,7 +213,40 @@ namespace BumperTanks.Gameplay
             health = Mathf.Max(0f, health - (flankHit ? 25f : 15f));
             var eliminated = health <= 0f;
             if (eliminated) gameObject.SetActive(false);
-            return eliminated;
+            return eliminated ? ProjectileHitResult.EliminatedTarget : ProjectileHitResult.Consumed;
+        }
+
+        public void BeginDash(float durationSeconds) => dashUntil = Time.time + Mathf.Max(0f, durationSeconds);
+
+        public void ApplyCollisionKnockback(Vector2 direction, float impulse)
+        {
+            if (direction.sqrMagnitude <= 0f || impulse <= 0f) return;
+            body.AddForce(direction.normalized * impulse, ForceMode2D.Impulse);
+        }
+
+        private void OnCollisionEnter2D(Collision2D collision)
+        {
+            var other = collision.collider.GetComponent<TankController2D>();
+            if (other == null || other == this || GetInstanceID() > other.GetInstanceID()) return;
+
+            var source = this;
+            var target = other;
+            if (other.BumpKnockbackMultiplier > BumpKnockbackMultiplier ||
+                (other.BumpKnockbackMultiplier == BumpKnockbackMultiplier && other.body.linearVelocity.sqrMagnitude > body.linearVelocity.sqrMagnitude))
+            {
+                source = other;
+                target = this;
+            }
+
+            var direction = (target.Position - source.Position).normalized;
+            var flankHit = CombatMath.IsFlankHit(target.Aim, direction);
+            var elapsed = MatchDirector.Instance != null ? MatchDirector.Instance.Elapsed : 0f;
+            var multiplier = Mathf.Max(source.BumpKnockbackMultiplier, target.BumpKnockbackMultiplier) *
+                             (flankHit ? CombatMath.FlankHitKnockbackMultiplier : 1f) *
+                             MatchRules.KnockbackMultiplier(elapsed);
+            var baseImpulse = CombatMath.CollisionImpulse(collision.relativeVelocity.magnitude, source.body.mass, target.body.mass);
+            var bonusImpulse = baseImpulse * (multiplier - 1f);
+            target.ApplyCollisionKnockback(direction, bonusImpulse);
         }
 
         public void ApplyPowerUp(PowerUpType powerUp)
