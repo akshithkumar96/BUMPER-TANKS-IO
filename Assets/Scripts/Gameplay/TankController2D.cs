@@ -24,7 +24,8 @@ namespace BumperTanks.Gameplay
         private Vector2 steering;
         private Vector2 aim = Vector2.up;
         private Vector2 touchOrigin;
-        private bool touchSteering;
+        private int steeringFingerId = -1;
+        private int aimFingerId = -1;
         private float health = 100f;
         private float nitroUntil;
         private float megaBulletUntil;
@@ -58,7 +59,7 @@ namespace BumperTanks.Gameplay
             if (!playerControlled || Camera.main == null) return;
             if (Input.touchCount > 0)
             {
-                ReadTouchInput(Input.GetTouch(0));
+                ReadTouchInputs();
             }
             else
             {
@@ -75,29 +76,45 @@ namespace BumperTanks.Gameplay
             if (Input.GetMouseButtonUp(0) || Input.GetKeyUp(KeyCode.Space)) Fire();
         }
 
-        private void ReadTouchInput(Touch touch)
+        private void ReadTouchInputs()
         {
             var halfWidth = Screen.width * 0.5f;
-            if (touch.phase == TouchPhase.Began)
+            for (var index = 0; index < Input.touchCount; index++)
             {
-                touchSteering = touch.position.x < halfWidth;
-                touchOrigin = touch.position;
-            }
+                var touch = Input.GetTouch(index);
+                if (touch.phase == TouchPhase.Began)
+                {
+                    if (touch.position.x < halfWidth && steeringFingerId < 0)
+                    {
+                        steeringFingerId = touch.fingerId;
+                        touchOrigin = touch.position;
+                    }
+                    else if (touch.position.x >= halfWidth && aimFingerId < 0)
+                    {
+                        aimFingerId = touch.fingerId;
+                    }
+                }
 
-            if (touchSteering)
-            {
-                steering = Vector2.ClampMagnitude((touch.position - touchOrigin) / (Screen.width * 0.16f), 1f);
+                if (touch.fingerId == steeringFingerId)
+                {
+                    steering = Vector2.ClampMagnitude((touch.position - touchOrigin) / (Screen.width * 0.16f), 1f);
+                    if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+                    {
+                        steering = Vector2.zero;
+                        steeringFingerId = -1;
+                    }
+                    continue;
+                }
+
+                if (touch.fingerId != aimFingerId) continue;
+                var target = Camera.main.ScreenToWorldPoint(touch.position);
+                aim = ((Vector2)target - body.position).normalized;
                 if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
                 {
-                    steering = Vector2.zero;
-                    touchSteering = false;
+                    if (touch.phase == TouchPhase.Ended) Fire();
+                    aimFingerId = -1;
                 }
-                return;
             }
-
-            var target = Camera.main.ScreenToWorldPoint(touch.position);
-            aim = ((Vector2)target - body.position).normalized;
-            if (touch.phase == TouchPhase.Ended) Fire();
         }
 
         private void FixedUpdate()
