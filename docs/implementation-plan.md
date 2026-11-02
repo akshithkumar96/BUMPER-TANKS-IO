@@ -40,7 +40,7 @@ Integrate Photon Fusion Shared Mode: matchmaking target under three seconds, bot
 
 Acceptance criteria: two clients complete a match; movement/projectiles stay within agreed error tolerances at simulated latency; no secrets are committed.
 
-Status: networking contracts and an SDK-gated Fusion Shared Mode adapter are in place. SDK import and an AppId remain external account configuration steps.
+Status: contracts, prediction, interpolation, and an SDK-gated Shared Mode adapter are in place. Fusion SDK import, Photon AppId, live two-client testing, and reconnect handling remain.
 
 Client-side snapshot interpolation and fixed-30-Hz prediction/reconciliation helpers are implemented and covered by Edit Mode tests; the adapter will feed them from Fusion snapshots after SDK installation.
 
@@ -50,11 +50,15 @@ Create menu, matchmaking, HUD, results screen, accessibility controls, cosmetic 
 
 Acceptance criteria: full menu-to-rematch journey works on touch and mouse; cosmetics persist; essential UI is screen-reader and contrast reviewed.
 
+Status: local arena HUD, result/rematch, color garage, daily reward, battle coins, and leaderboard are implemented. A real front menu, accessible UI review, and device-scale UX pass remain.
+
 ## Module 6 Live Operations
 
 Add approved ad mediation, analytics, consent-aware telemetry, remote tuning, crash reporting, and server-side validation for rewards.
 
 Acceptance criteria: services remain disabled without configured environment-specific credentials; rewards cannot be doubled locally; privacy/consent paths are tested.
+
+Status: profile/reward/leaderboard APIs, persistent JSON storage, match idempotency, basic telemetry, CORS configuration, and request throttling are implemented. Production identity, authoritative match validation, consent flow, and ad mediation remain.
 
 ## Module 7 Release QA
 
