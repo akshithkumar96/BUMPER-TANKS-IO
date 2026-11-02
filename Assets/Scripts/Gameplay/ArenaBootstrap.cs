@@ -62,14 +62,14 @@ namespace BumperTanks.Gameplay
                 if (GUI.Button(new Rect(Screen.width * 0.5f - 115f, Screen.height * 0.5f + 20f, 110f, 34f), "Garage (G)"))
                 {
                     showFrontMenu = false;
-                    Time.timeScale = 1f;
-                    StartCoroutine(OpenGarageNextFrame());
+                    SendMessage("CloseLeaderboard", SendMessageOptions.DontRequireReceiver);
+                    SendMessage("OpenGarage", SendMessageOptions.DontRequireReceiver);
                 }
                 if (GUI.Button(new Rect(Screen.width * 0.5f + 5f, Screen.height * 0.5f + 20f, 110f, 34f), "Scores (L)"))
                 {
                     showFrontMenu = false;
-                    Time.timeScale = 1f;
-                    StartCoroutine(OpenScoresNextFrame());
+                    SendMessage("CloseGarage", SendMessageOptions.DontRequireReceiver);
+                    SendMessage("OpenLeaderboard", SendMessageOptions.DontRequireReceiver);
                 }
                 GUI.Label(new Rect(Screen.width * 0.5f - 140f, Screen.height * 0.5f + 68f, 280f, 24f), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
                 return;
@@ -103,16 +103,10 @@ namespace BumperTanks.Gameplay
             }
         }
 
-        private System.Collections.IEnumerator OpenGarageNextFrame()
+        public void ShowFrontMenu()
         {
-            yield return null;
-            SendMessage("OpenGarage", SendMessageOptions.DontRequireReceiver);
-        }
-
-        private System.Collections.IEnumerator OpenScoresNextFrame()
-        {
-            yield return null;
-            SendMessage("OpenLeaderboard", SendMessageOptions.DontRequireReceiver);
+            showFrontMenu = true;
+            Time.timeScale = 0f;
         }
 
         private static void CreateCamera()

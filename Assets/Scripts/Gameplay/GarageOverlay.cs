@@ -28,12 +28,12 @@ namespace BumperTanks.Gameplay
         private void OnGUI()
         {
             if (!open) return;
-            GUI.Box(new Rect(Screen.width - 210, 12, 198, 210), "Garage");
-            GUI.Label(new Rect(Screen.width - 195, 42, 170, 20), "Choose tank color");
+            GUI.Box(new Rect(Screen.width - 230, 12, 218, 246), "Garage");
+            GUI.Label(new Rect(Screen.width - 210, 42, 180, 20), "Choose tank color");
             ColorButton("sky", new Color(0.15f, 0.75f, 1f), 70);
             ColorButton("coral", new Color(1f, 0.35f, 0.3f), 105);
             ColorButton("lime", new Color(0.35f, 1f, 0.45f), 140);
-            if (GUI.Button(new Rect(Screen.width - 190, 170, 156, 26), "Claim daily 50 coins"))
+            if (GUI.Button(new Rect(Screen.width - 210, 175, 178, 28), "Claim daily 50 coins"))
             {
                 GameServiceClient.Instance?.ClaimDailyReward(playerId, () =>
                 {
@@ -42,14 +42,21 @@ namespace BumperTanks.Gameplay
                     ProfileStore.Save(profile);
                 });
             }
+            if (GUI.Button(new Rect(Screen.width - 210, 211, 178, 28), "Back to main menu"))
+            {
+                open = false;
+                SendMessage("ShowFrontMenu", SendMessageOptions.DontRequireReceiver);
+            }
         }
+
+        public void CloseGarage() => open = false;
 
         private void ColorButton(string id, Color color, float y)
         {
             var label = profile.ColorId == id ? $"✓ {id}" : id;
             var previous = GUI.color;
             GUI.color = color;
-            if (GUI.Button(new Rect(Screen.width - 190, y, 156, 26), label))
+            if (GUI.Button(new Rect(Screen.width - 210, y, 178, 26), label))
             {
                 profile.ColorId = id;
                 ProfileStore.Save(profile);
