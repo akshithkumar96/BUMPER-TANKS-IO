@@ -27,11 +27,8 @@ app.MapPost("/v1/rewards/daily", (DailyRewardRequest request) =>
 {
     if (string.IsNullOrWhiteSpace(request.PlayerId)) return Results.BadRequest(new { error = "playerId is required" });
     var today = DateOnly.FromDateTime(DateTime.UtcNow);
-    var profile = profiles.GetOrCreate(request.PlayerId);
-    if (profile.LastDailyRewardUtc == today) return Results.Conflict(new { error = "daily reward already claimed" });
-
-    var updated = profile with { BattleCoins = profile.BattleCoins + 50, LastDailyRewardUtc = today };
-    profiles.Save(updated);
+    if (!profiles.TryClaimDailyReward(request.PlayerId, today, 50, out var updated))
+        return Results.Conflict(new { error = "daily reward already claimed" });
     return Results.Ok(updated);
 }).RequireRateLimiting("rewards");
 

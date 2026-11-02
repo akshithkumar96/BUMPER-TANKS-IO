@@ -21,12 +21,31 @@ public sealed class ProfileRepository
     public void Save(PlayerProfile profile)
     {
         profiles[profile.PlayerId] = profile;
+        lock (writeLock) PersistLocked();
+    }
+
+    public bool TryClaimDailyReward(string playerId, DateOnly today, int reward, out PlayerProfile updated)
+    {
         lock (writeLock)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var temporary = path + ".tmp";
-            File.WriteAllText(temporary, JsonSerializer.Serialize(profiles));
-            File.Move(temporary, path, true);
+            var current = GetOrCreate(playerId);
+            if (current.LastDailyRewardUtc == today)
+            {
+                updated = current;
+                return false;
+            }
+            updated = current with { BattleCoins = current.BattleCoins + reward, LastDailyRewardUtc = today };
+            profiles[playerId] = updated;
+            PersistLocked();
+            return true;
         }
+    }
+
+    private void PersistLocked()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + ".tmp";
+        File.WriteAllText(temporary, JsonSerializer.Serialize(profiles));
+        File.Move(temporary, path, true);
     }
 }
