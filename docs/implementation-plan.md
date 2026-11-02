@@ -58,7 +58,7 @@ Add approved ad mediation, analytics, consent-aware telemetry, remote tuning, cr
 
 Acceptance criteria: services remain disabled without configured environment-specific credentials; rewards cannot be doubled locally; privacy/consent paths are tested.
 
-Status: profile/reward/leaderboard APIs, persistent JSON storage, match idempotency, basic telemetry, CORS configuration, and request throttling are implemented. Production identity, authoritative match validation, consent flow, and ad mediation remain.
+Status: profile/reward/leaderboard APIs, persistent JSON storage, match idempotency, basic telemetry, CORS configuration, request throttling, bounded identifier/event validation, and capped telemetry retention are implemented. The Unity client syncs its coin balance from successful server reward responses. Production identity, authoritative match validation, consent flow, and ad mediation remain.
 
 ## Module 7 Release QA
 
