@@ -20,12 +20,21 @@ namespace BumperTanks.Frontend
 
         public void SubmitMatch(string playerId, string matchId, int gems, int eliminations, Action<string> onError = null)
         {
-            StartCoroutine(PostJson("/v1/matches/complete", JsonUtility.ToJson(new MatchResult(playerId, matchId, gems, eliminations)), onError));
+            StartCoroutine(PostJsonResponse("/v1/matches/complete", JsonUtility.ToJson(new MatchResult(playerId, matchId, gems, eliminations)), response =>
+            {
+                var result = JsonUtility.FromJson<MatchCompleteResponse>(response);
+                if (result?.profile != null) SetBattleCoins(result.profile.battleCoins);
+            }, onError));
         }
 
         public void ClaimDailyReward(string playerId, Action onSuccess = null, Action<string> onError = null)
         {
-            StartCoroutine(PostJson("/v1/rewards/daily", JsonUtility.ToJson(new DailyReward(playerId)), onSuccess, onError));
+            StartCoroutine(PostJsonResponse("/v1/rewards/daily", JsonUtility.ToJson(new DailyReward(playerId)), response =>
+            {
+                var profile = JsonUtility.FromJson<ServerProfile>(response);
+                if (profile != null) SetBattleCoins(profile.battleCoins);
+                onSuccess?.Invoke();
+            }, onError));
         }
 
         public void Track(string playerId, string eventName)
@@ -38,9 +47,9 @@ namespace BumperTanks.Frontend
             StartCoroutine(GetJson("/v1/leaderboard", json => onComplete?.Invoke(JsonUtility.FromJson<LeaderboardPayload>(json)?.entries ?? Array.Empty<LeaderboardEntry>()), onError));
         }
 
-        private IEnumerator PostJson(string path, string json, Action<string> onError) => PostJson(path, json, null, onError);
+        private IEnumerator PostJson(string path, string json, Action<string> onError) => PostJsonResponse(path, json, null, onError);
 
-        private IEnumerator PostJson(string path, string json, Action onSuccess, Action<string> onError)
+        private IEnumerator PostJsonResponse(string path, string json, Action<string> onSuccess, Action<string> onError)
         {
             using var request = new UnityWebRequest(baseUrl.TrimEnd('/') + path, UnityWebRequest.kHttpVerbPOST);
             request.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(json));
@@ -48,7 +57,14 @@ namespace BumperTanks.Frontend
             request.SetRequestHeader("Content-Type", "application/json");
             yield return request.SendWebRequest();
             if (request.result != UnityWebRequest.Result.Success) onError?.Invoke(request.error);
-            else onSuccess?.Invoke();
+            else onSuccess?.Invoke(request.downloadHandler.text);
+        }
+
+        private static void SetBattleCoins(int battleCoins)
+        {
+            var profile = ProfileStore.Load();
+            profile.BattleCoins = battleCoins;
+            ProfileStore.Save(profile);
         }
 
         private IEnumerator GetJson(string path, Action<string> onSuccess, Action<string> onError)
@@ -86,6 +102,12 @@ namespace BumperTanks.Frontend
 
         [Serializable]
         private sealed class LeaderboardPayload { public LeaderboardEntry[] entries; }
+
+        [Serializable]
+        private sealed class MatchCompleteResponse { public ServerProfile profile; }
+
+        [Serializable]
+        private sealed class ServerProfile { public int battleCoins; }
 
         [Serializable]
         public sealed class LeaderboardEntry { public string playerId; public int battleCoins; public int matchesPlayed; }

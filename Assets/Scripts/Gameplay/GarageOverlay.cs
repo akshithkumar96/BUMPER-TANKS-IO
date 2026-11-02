@@ -9,6 +9,7 @@ namespace BumperTanks.Gameplay
         private PlayerProfile profile;
         private TankController2D player;
         private string playerId;
+        private string dailyRewardMessage = string.Empty;
 
         private void Start()
         {
@@ -37,12 +38,14 @@ namespace BumperTanks.Gameplay
             {
                 GameServiceClient.Instance?.ClaimDailyReward(playerId, () =>
                 {
+                    profile = ProfileStore.Load();
                     profile.DailySpinDay = System.DateTime.UtcNow.DayOfYear;
-                    profile.BattleCoins += 50;
                     ProfileStore.Save(profile);
-                });
+                    dailyRewardMessage = "Daily reward claimed.";
+                }, _ => dailyRewardMessage = "Reward unavailable. Try again later.");
             }
-            if (GUI.Button(new Rect(Screen.width - 210, 211, 178, 28), "Back to main menu"))
+            if (!string.IsNullOrEmpty(dailyRewardMessage)) GUI.Label(new Rect(Screen.width - 210, 203, 178, 20), dailyRewardMessage);
+            if (GUI.Button(new Rect(Screen.width - 210, 229, 178, 28), "Back to main menu"))
             {
                 open = false;
                 SendMessage("ShowFrontMenu", SendMessageOptions.DontRequireReceiver);
