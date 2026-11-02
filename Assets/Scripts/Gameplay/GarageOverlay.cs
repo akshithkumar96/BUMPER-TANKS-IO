@@ -23,6 +23,8 @@ namespace BumperTanks.Gameplay
             if (Input.GetKeyDown(KeyCode.G)) open = !open;
         }
 
+        public void OpenGarage() => open = true;
+
         private void OnGUI()
         {
             if (!open) return;

@@ -11,10 +11,12 @@ namespace BumperTanks.Gameplay
         private TankController2D player;
         private MatchDirector match;
         private string localPlayerId;
+        private bool showFrontMenu = true;
 
         private void Awake()
         {
             localPlayerId = ProfileStore.GetOrCreatePlayerId();
+            Time.timeScale = 0f;
             if (FindFirstObjectByType<GameServiceClient>() == null) new GameObject("Game Service Client").AddComponent<GameServiceClient>();
             StartCoroutine(TrackArenaStarted());
             match = gameObject.AddComponent<MatchDirector>();
@@ -47,6 +49,31 @@ namespace BumperTanks.Gameplay
 
         private void OnGUI()
         {
+            if (showFrontMenu)
+            {
+                GUI.Box(new Rect(Screen.width * 0.5f - 170f, Screen.height * 0.5f - 120f, 340f, 240f), "BUMPER TANKS IO");
+                GUI.Label(new Rect(Screen.width * 0.5f - 140f, Screen.height * 0.5f - 75f, 280f, 25f), "Top down arena brawler");
+                if (GUI.Button(new Rect(Screen.width * 0.5f - 115f, Screen.height * 0.5f - 30f, 230f, 40f), "Play Arena"))
+                {
+                    showFrontMenu = false;
+                    Time.timeScale = 1f;
+                    StartCoroutine(TrackArenaStarted());
+                }
+                if (GUI.Button(new Rect(Screen.width * 0.5f - 115f, Screen.height * 0.5f + 20f, 110f, 34f), "Garage (G)"))
+                {
+                    showFrontMenu = false;
+                    Time.timeScale = 1f;
+                    StartCoroutine(OpenGarageNextFrame());
+                }
+                if (GUI.Button(new Rect(Screen.width * 0.5f + 5f, Screen.height * 0.5f + 20f, 110f, 34f), "Scores (L)"))
+                {
+                    showFrontMenu = false;
+                    Time.timeScale = 1f;
+                    StartCoroutine(OpenScoresNextFrame());
+                }
+                GUI.Label(new Rect(Screen.width * 0.5f - 140f, Screen.height * 0.5f + 68f, 280f, 24f), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
+                return;
+            }
             GUI.Box(new Rect(12, 12, 345, 92), "BUMPER TANKS IO - Offline Arena");
             GUI.Label(new Rect(25, 40, 320, 24), "Desktop: WASD/arrows, mouse, click release, E, G garage | Mobile: left drag, right release");
             GUI.Label(new Rect(25, 66, 320, 24), player != null ? $"{player.Archetype}  Health: {player.Health:0}" : "Player eliminated");
@@ -74,6 +101,18 @@ namespace BumperTanks.Gameplay
                     }
                 }
             }
+        }
+
+        private System.Collections.IEnumerator OpenGarageNextFrame()
+        {
+            yield return null;
+            SendMessage("OpenGarage", SendMessageOptions.DontRequireReceiver);
+        }
+
+        private System.Collections.IEnumerator OpenScoresNextFrame()
+        {
+            yield return null;
+            SendMessage("OpenLeaderboard", SendMessageOptions.DontRequireReceiver);
         }
 
         private static void CreateCamera()

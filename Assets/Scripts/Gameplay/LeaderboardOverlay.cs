@@ -15,6 +15,12 @@ namespace BumperTanks.Gameplay
             if (open) GameServiceClient.Instance?.FetchLeaderboard(result => entries = result);
         }
 
+        public void OpenLeaderboard()
+        {
+            open = true;
+            GameServiceClient.Instance?.FetchLeaderboard(result => entries = result);
+        }
+
         private void OnGUI()
         {
             if (!open) return;
