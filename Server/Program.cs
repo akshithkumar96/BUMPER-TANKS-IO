@@ -20,12 +20,13 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapGet("/v1/profiles/{playerId}", (string playerId) =>
 {
+    if (!RequestValidation.IsPlayerId(playerId)) return Results.BadRequest(new { error = "invalid playerId" });
     return Results.Ok(profiles.GetOrCreate(playerId));
 });
 
 app.MapPost("/v1/rewards/daily", (DailyRewardRequest request) =>
 {
-    if (string.IsNullOrWhiteSpace(request.PlayerId)) return Results.BadRequest(new { error = "playerId is required" });
+    if (!RequestValidation.IsPlayerId(request.PlayerId)) return Results.BadRequest(new { error = "invalid playerId" });
     var today = DateOnly.FromDateTime(DateTime.UtcNow);
     if (!profiles.TryClaimDailyReward(request.PlayerId, today, 50, out var updated))
         return Results.Conflict(new { error = "daily reward already claimed" });
@@ -34,7 +35,7 @@ app.MapPost("/v1/rewards/daily", (DailyRewardRequest request) =>
 
 app.MapPost("/v1/matches/complete", (MatchCompleteRequest request) =>
 {
-    if (string.IsNullOrWhiteSpace(request.PlayerId) || string.IsNullOrWhiteSpace(request.MatchId) || request.MatchId.Length > 80 || request.Gems < 0 || request.Eliminations < 0)
+    if (!RequestValidation.IsPlayerId(request.PlayerId) || !RequestValidation.IsMatchId(request.MatchId) || request.Gems is < 0 or > 1000 || request.Eliminations is < 0 or > 7)
         return Results.BadRequest(new { error = "invalid match result" });
 
     if (!profiles.TryCompleteMatch(request.PlayerId, request.MatchId, request.Gems, request.Eliminations, out var updated, out var award))
@@ -44,7 +45,7 @@ app.MapPost("/v1/matches/complete", (MatchCompleteRequest request) =>
 
 app.MapPost("/v1/telemetry", (TelemetryRequest request) =>
 {
-    if (string.IsNullOrWhiteSpace(request.PlayerId) || string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 64)
+    if (!RequestValidation.IsPlayerId(request.PlayerId) || !RequestValidation.IsTelemetryName(request.Name))
         return Results.BadRequest(new { error = "invalid telemetry event" });
     telemetry.Track(new TelemetryEvent(request.Name, request.PlayerId, DateTimeOffset.MinValue));
     return Results.Accepted();

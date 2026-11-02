@@ -39,7 +39,7 @@ public sealed class ProfileRepository
                 updated = current;
                 return false;
             }
-            updated = current with { BattleCoins = current.BattleCoins + reward, LastDailyRewardUtc = today };
+            updated = current with { BattleCoins = (int)Math.Min(int.MaxValue, (long)current.BattleCoins + reward), LastDailyRewardUtc = today };
             profiles[playerId] = updated;
             PersistLocked();
             return true;
@@ -58,8 +58,12 @@ public sealed class ProfileRepository
                 award = 0;
                 return false;
             }
-            award = Math.Min(200, gems + eliminations * 10);
-            updated = current with { BattleCoins = current.BattleCoins + award, MatchesPlayed = current.MatchesPlayed + 1 };
+            award = (int)Math.Min(200L, (long)gems + (long)eliminations * 10);
+            updated = current with
+            {
+                BattleCoins = (int)Math.Min(int.MaxValue, (long)current.BattleCoins + award),
+                MatchesPlayed = current.MatchesPlayed == int.MaxValue ? int.MaxValue : current.MatchesPlayed + 1
+            };
             profiles[playerId] = updated;
             PersistLocked();
             return true;
