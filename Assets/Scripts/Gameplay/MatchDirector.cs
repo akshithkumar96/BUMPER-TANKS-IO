@@ -15,6 +15,7 @@ namespace BumperTanks.Gameplay
         private TankController2D winner;
 
         public float Elapsed => Time.time - startedAt;
+        public string MatchId { get; private set; }
         public MatchPhase Phase => phase;
         public int CollapseSteps => collapseSteps;
         public TankController2D Winner => winner;
@@ -25,6 +26,7 @@ namespace BumperTanks.Gameplay
         {
             Instance = this;
             startedAt = Time.time;
+            MatchId = System.Guid.NewGuid().ToString("N");
         }
 
         private void OnDestroy()

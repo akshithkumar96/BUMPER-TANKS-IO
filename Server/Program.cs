@@ -34,13 +34,11 @@ app.MapPost("/v1/rewards/daily", (DailyRewardRequest request) =>
 
 app.MapPost("/v1/matches/complete", (MatchCompleteRequest request) =>
 {
-    if (string.IsNullOrWhiteSpace(request.PlayerId) || request.Gems < 0 || request.Eliminations < 0)
+    if (string.IsNullOrWhiteSpace(request.PlayerId) || string.IsNullOrWhiteSpace(request.MatchId) || request.MatchId.Length > 80 || request.Gems < 0 || request.Eliminations < 0)
         return Results.BadRequest(new { error = "invalid match result" });
 
-    var profile = profiles.GetOrCreate(request.PlayerId);
-    var award = Math.Min(200, request.Gems + request.Eliminations * 10);
-    var updated = profile with { BattleCoins = profile.BattleCoins + award, MatchesPlayed = profile.MatchesPlayed + 1 };
-    profiles.Save(updated);
+    if (!profiles.TryCompleteMatch(request.PlayerId, request.MatchId, request.Gems, request.Eliminations, out var updated, out var award))
+        return Results.Conflict(new { error = "match result already submitted" });
     return Results.Ok(new { profile = updated, award });
 }).RequireRateLimiting("rewards");
 
@@ -57,6 +55,6 @@ app.Run();
 
 public sealed record PlayerProfile(string PlayerId, int BattleCoins, int MatchesPlayed, DateOnly LastDailyRewardUtc);
 public sealed record DailyRewardRequest(string PlayerId);
-public sealed record MatchCompleteRequest(string PlayerId, int Gems, int Eliminations);
+public sealed record MatchCompleteRequest(string PlayerId, string MatchId, int Gems, int Eliminations);
 public sealed record TelemetryRequest(string PlayerId, string Name);
 public sealed record LeaderboardResponse(PlayerProfile[] Entries);

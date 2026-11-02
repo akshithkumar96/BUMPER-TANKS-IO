@@ -18,9 +18,9 @@ namespace BumperTanks.Frontend
             DontDestroyOnLoad(gameObject);
         }
 
-        public void SubmitMatch(string playerId, int gems, int eliminations, Action<string> onError = null)
+        public void SubmitMatch(string playerId, string matchId, int gems, int eliminations, Action<string> onError = null)
         {
-            StartCoroutine(PostJson("/v1/matches/complete", JsonUtility.ToJson(new MatchResult(playerId, gems, eliminations)), onError));
+            StartCoroutine(PostJson("/v1/matches/complete", JsonUtility.ToJson(new MatchResult(playerId, matchId, gems, eliminations)), onError));
         }
 
         public void ClaimDailyReward(string playerId, Action onSuccess = null, Action<string> onError = null)
@@ -63,9 +63,10 @@ namespace BumperTanks.Frontend
         private sealed class MatchResult
         {
             public string PlayerId;
+            public string MatchId;
             public int Gems;
             public int Eliminations;
-            public MatchResult(string playerId, int gems, int eliminations) => (PlayerId, Gems, Eliminations) = (playerId, gems, eliminations);
+            public MatchResult(string playerId, string matchId, int gems, int eliminations) => (PlayerId, MatchId, Gems, Eliminations) = (playerId, matchId, gems, eliminations);
         }
 
         [Serializable]
