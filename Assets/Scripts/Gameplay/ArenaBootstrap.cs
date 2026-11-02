@@ -22,6 +22,7 @@ namespace BumperTanks.Gameplay
             CreateArenaBounds();
             player = CreateTank("Player Speedy Bumper", new Vector2(0f, -3f), TankArchetype.SpeedyBumper, true, new Color(0.15f, 0.75f, 1f));
             gameObject.AddComponent<GarageOverlay>();
+            gameObject.AddComponent<LeaderboardOverlay>();
             var heavy = CreateTank("Heavy Dozer Bot", new Vector2(-4f, 3f), TankArchetype.HeavyDozer, false, new Color(1f, 0.55f, 0.15f));
             heavy.gameObject.AddComponent<BotDriver>();
             var spinner = CreateTank("Ricochet Spinner Bot", new Vector2(4f, 3f), TankArchetype.RicochetSpinner, false, new Color(0.9f, 0.25f, 0.8f));

@@ -55,10 +55,11 @@ app.MapPost("/v1/telemetry", (TelemetryRequest request) =>
     return Results.Accepted();
 }).RequireRateLimiting("rewards");
 
-app.MapGet("/v1/leaderboard", () => Results.Ok(profiles.All.OrderByDescending(profile => profile.BattleCoins).Take(50)));
+app.MapGet("/v1/leaderboard", () => Results.Ok(new LeaderboardResponse(profiles.All.OrderByDescending(profile => profile.BattleCoins).Take(50).ToArray())));
 app.Run();
 
 public sealed record PlayerProfile(string PlayerId, int BattleCoins, int MatchesPlayed, DateOnly LastDailyRewardUtc);
 public sealed record DailyRewardRequest(string PlayerId);
 public sealed record MatchCompleteRequest(string PlayerId, int Gems, int Eliminations);
 public sealed record TelemetryRequest(string PlayerId, string Name);
+public sealed record LeaderboardResponse(PlayerProfile[] Entries);

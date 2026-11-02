@@ -33,6 +33,11 @@ namespace BumperTanks.Frontend
             StartCoroutine(PostJson("/v1/telemetry", JsonUtility.ToJson(new Telemetry(playerId, eventName)), null));
         }
 
+        public void FetchLeaderboard(Action<LeaderboardEntry[]> onComplete, Action<string> onError = null)
+        {
+            StartCoroutine(GetJson("/v1/leaderboard", json => onComplete?.Invoke(JsonUtility.FromJson<LeaderboardPayload>(json)?.entries ?? Array.Empty<LeaderboardEntry>()), onError));
+        }
+
         private IEnumerator PostJson(string path, string json, Action<string> onError) => PostJson(path, json, null, onError);
 
         private IEnumerator PostJson(string path, string json, Action onSuccess, Action<string> onError)
@@ -44,6 +49,14 @@ namespace BumperTanks.Frontend
             yield return request.SendWebRequest();
             if (request.result != UnityWebRequest.Result.Success) onError?.Invoke(request.error);
             else onSuccess?.Invoke();
+        }
+
+        private IEnumerator GetJson(string path, Action<string> onSuccess, Action<string> onError)
+        {
+            using var request = UnityWebRequest.Get(baseUrl.TrimEnd('/') + path);
+            yield return request.SendWebRequest();
+            if (request.result != UnityWebRequest.Result.Success) onError?.Invoke(request.error);
+            else onSuccess?.Invoke(request.downloadHandler.text);
         }
 
         [Serializable]
@@ -69,5 +82,11 @@ namespace BumperTanks.Frontend
             public string Name;
             public Telemetry(string playerId, string name) => (PlayerId, Name) = (playerId, name);
         }
+
+        [Serializable]
+        private sealed class LeaderboardPayload { public LeaderboardEntry[] entries; }
+
+        [Serializable]
+        public sealed class LeaderboardEntry { public string playerId; public int battleCoins; public int matchesPlayed; }
     }
 }
