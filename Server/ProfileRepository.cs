@@ -11,9 +11,13 @@ public sealed class ProfileRepository
     public ProfileRepository(IConfiguration configuration)
     {
         path = configuration["Storage:ProfilePath"] ?? Path.Combine(AppContext.BaseDirectory, "data", "profiles.json");
-        profiles = File.Exists(path)
-            ? new ConcurrentDictionary<string, PlayerProfile>(JsonSerializer.Deserialize<Dictionary<string, PlayerProfile>>(File.ReadAllText(path)) ?? [])
-            : new ConcurrentDictionary<string, PlayerProfile>();
+        if (File.Exists(path))
+        {
+            var snapshot = JsonSerializer.Deserialize<ProfileSnapshot>(File.ReadAllText(path)) ?? new ProfileSnapshot();
+            profiles = new ConcurrentDictionary<string, PlayerProfile>(snapshot.Profiles);
+            completedMatches.UnionWith(snapshot.CompletedMatches);
+        }
+        else profiles = new ConcurrentDictionary<string, PlayerProfile>();
     }
 
     public PlayerProfile GetOrCreate(string playerId) => profiles.GetOrAdd(playerId, static id => new PlayerProfile(id, 0, 0, DateOnly.MinValue));
@@ -66,7 +70,17 @@ public sealed class ProfileRepository
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(profiles));
+        File.WriteAllText(temporary, JsonSerializer.Serialize(new ProfileSnapshot
+        {
+            Profiles = profiles.ToDictionary(pair => pair.Key, pair => pair.Value),
+            CompletedMatches = completedMatches
+        }));
         File.Move(temporary, path, true);
     }
+}
+
+public sealed class ProfileSnapshot
+{
+    public Dictionary<string, PlayerProfile> Profiles { get; set; } = new();
+    public HashSet<string> CompletedMatches { get; set; } = new();
 }
