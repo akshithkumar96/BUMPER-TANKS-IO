@@ -1,3 +1,4 @@
+using BumperTanks.Core;
 using UnityEngine;
 
 namespace BumperTanks.Match
@@ -21,6 +22,15 @@ namespace BumperTanks.Match
         {
             if (elapsedSeconds < OpenArenaEnd) return 0;
             return Mathf.Clamp(Mathf.FloorToInt((elapsedSeconds - OpenArenaEnd) / CollapseInterval) + 1, 0, 6);
+        }
+
+        public static ArenaBounds BoundsAt(float elapsedSeconds)
+        {
+            var steps = CollapseStepsAt(elapsedSeconds);
+            var progress = steps / 6f;
+            var width = Mathf.Lerp(16f, 3f, progress);
+            var height = Mathf.Lerp(12f, 3f, progress);
+            return new ArenaBounds(Vector2.zero, new Vector2(width, height));
         }
 
         public static float KnockbackMultiplier(float elapsedSeconds) => PhaseAt(elapsedSeconds) == MatchPhase.FinalZone ? 1.5f : 1f;

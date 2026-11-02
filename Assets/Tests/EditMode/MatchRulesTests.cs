@@ -32,6 +32,30 @@ namespace BumperTanks.Tests
         }
 
         [Test]
+        public void ArenaBoundsCollapseToTheCenteredThreeByThreeZone()
+        {
+            var open = MatchRules.BoundsAt(0f);
+            var final = MatchRules.BoundsAt(60f);
+
+            Assert.That(open.Size, Is.EqualTo(new UnityEngine.Vector2(16f, 12f)));
+            Assert.That(final.Size, Is.EqualTo(new UnityEngine.Vector2(3f, 3f)));
+            Assert.That(final.Min, Is.EqualTo(new UnityEngine.Vector2(-1.5f, -1.5f)));
+            Assert.That(final.Max, Is.EqualTo(new UnityEngine.Vector2(1.5f, 1.5f)));
+            Assert.That(final.Contains(final.Clamp(new UnityEngine.Vector2(20f, -20f))), Is.True);
+        }
+
+        [Test]
+        public void ArenaBoundsOnlyShrinkAtFiveSecondCollapseBoundaries()
+        {
+            var before = MatchRules.BoundsAt(34.99f);
+            var atNextStep = MatchRules.BoundsAt(35f);
+
+            Assert.That(before.Size, Is.EqualTo(MatchRules.BoundsAt(30f).Size));
+            Assert.That(atNextStep.Size.x, Is.LessThan(before.Size.x));
+            Assert.That(atNextStep.Size.y, Is.LessThan(before.Size.y));
+        }
+
+        [Test]
         public void BotFillTargetsExactlyEightParticipants()
         {
             var fill = new BotFillService();

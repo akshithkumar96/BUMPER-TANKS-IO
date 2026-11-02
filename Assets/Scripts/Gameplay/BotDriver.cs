@@ -12,8 +12,16 @@ namespace BumperTanks.Gameplay
 
         private void Update()
         {
-            var player = FindFirstObjectByType<TankController2D>();
-            if (player == null || player == tank || !player.IsPlayer) return;
+            TankController2D player = null;
+            foreach (var candidate in FindObjectsByType<TankController2D>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (candidate.IsPlayer)
+                {
+                    player = candidate;
+                    break;
+                }
+            }
+            if (player == null || player == tank) return;
             var towardPlayer = player.Position - tank.Position;
             tank.Drive(towardPlayer.normalized, towardPlayer);
             if (towardPlayer.sqrMagnitude < 100f && Time.time >= nextShot)

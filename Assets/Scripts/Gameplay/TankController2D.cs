@@ -43,6 +43,7 @@ namespace BumperTanks.Gameplay
             archetype = value;
             playerControlled = isPlayer;
             tuning = TankTuning.For(archetype);
+            if (body != null) body.mass = tuning.Mass(baseMass);
         }
 
         private void Awake()
@@ -51,6 +52,7 @@ namespace BumperTanks.Gameplay
             body.gravityScale = 0f;
             body.linearDamping = 0f;
             tuning = TankTuning.For(archetype);
+            body.mass = tuning.Mass(baseMass);
             weapon = new TankWeapon(projectileCooldown, projectileImpulse);
         }
 
@@ -165,10 +167,11 @@ namespace BumperTanks.Gameplay
                 body.AddForce(impactDirection * (impulse * 0.25f), ForceMode2D.Impulse);
                 return false;
             }
-            var rearHit = CombatMath.IsRearHit(aim, impactDirection);
-            var knockback = CombatMath.Knockback(impulse, tuning.Mass(baseMass), rearHit);
+            var flankHit = CombatMath.IsFlankHit(aim, impactDirection);
+            var elapsed = MatchDirector.Instance != null ? MatchDirector.Instance.Elapsed : 0f;
+            var knockback = CombatMath.Knockback(impulse, tuning.Mass(baseMass), flankHit, MatchRules.KnockbackMultiplier(elapsed));
             body.AddForce(impactDirection * knockback, ForceMode2D.Impulse);
-            health = Mathf.Max(0f, health - (rearHit ? 25f : 15f));
+            health = Mathf.Max(0f, health - (flankHit ? 25f : 15f));
             var eliminated = health <= 0f;
             if (eliminated) gameObject.SetActive(false);
             return eliminated;

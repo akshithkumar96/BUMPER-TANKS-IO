@@ -7,13 +7,25 @@ namespace BumperTanks.Tests
     public class CombatTests
     {
         [Test]
-        public void RearHitAppliesGddKnockbackBonus()
+        public void FlankHitAppliesGddKnockbackBonus()
         {
             var normal = CombatMath.Knockback(6f, 2f, false);
-            var rear = CombatMath.Knockback(6f, 2f, true);
+            var flank = CombatMath.Knockback(6f, 2f, true);
 
-            Assert.That(rear, Is.EqualTo(normal * 1.5f));
-            Assert.That(CombatMath.IsRearHit(Vector2.up, Vector2.down), Is.True);
+            Assert.That(flank, Is.EqualTo(normal * 1.5f));
+            Assert.That(CombatMath.IsFlankHit(Vector2.up, Vector2.right), Is.True);
+            Assert.That(CombatMath.IsFlankHit(Vector2.up, Vector2.left), Is.True);
+            Assert.That(CombatMath.IsFlankHit(Vector2.up, Vector2.up), Is.False);
+            Assert.That(CombatMath.IsFlankHit(Vector2.up, Vector2.down), Is.False);
+        }
+
+        [Test]
+        public void SuddenDeathAddsFiftyPercentKnockbackAfterFlankBonus()
+        {
+            var opening = CombatMath.Knockback(6f, 2f, true);
+            var suddenDeath = CombatMath.Knockback(6f, 2f, true, 1.5f);
+
+            Assert.That(suddenDeath, Is.EqualTo(opening * 1.5f));
         }
 
         [Test]

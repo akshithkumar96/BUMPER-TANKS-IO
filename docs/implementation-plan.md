@@ -24,15 +24,17 @@ Status: complete and pushed as `3a6c003`.
 
 Implement a local playable arena with the three GDD archetypes, virtual joystick and mouse controls, projectile recoil, vehicle impulses, rear-hit multiplier, and abilities.
 
-Acceptance criteria: each tank is controllable; a released shot applies recoil; collision response differs by mass; rear hits apply 1.5x knockback; ability cooldown behavior is tested.
+Acceptance criteria: each tank is controllable; a released shot applies recoil; collision response differs by mass; flank hits apply 1.5x knockback; ability cooldown behavior is tested.
 
-Status: in progress. The runtime arena, keyboard/mouse/touch controls, bots, projectiles, recoil, rear-hit knockback, power-ups, scoring, and initial three abilities are implemented; Play Mode verification remains.
+Status: in progress. The runtime arena, keyboard/mouse/touch controls, bots, projectiles, recoil, flank knockback, power-ups, scoring, and initial three abilities are implemented; several abilities still differ from the GDD, and Play Mode verification remains.
 
 ## Module 3 Match Director and Bots
 
 Add a 90-120 second state machine: broad arena/power-ups, 5-second tile collapse, 3x3 safe zone, doubled gems, increased knockback, elimination/scoring, and fill bots.
 
 Acceptance criteria: match phases transition at their defined times; arena changes are deterministic; a bot can seek targets and power-ups; a match ends with a winner.
+
+Status: the 90-second phase schedule, shared arena bounds, centered 3×3 sudden-death zone, five-second boundary warnings, out-of-bounds pickup cleanup, phase gem multiplier, phase knockback multiplier, and 2.5-second bot fill are implemented. Bot power-up seeking and full match-resolution behavior still need work and Play Mode verification.
 
 ## Module 4 Multiplayer
 

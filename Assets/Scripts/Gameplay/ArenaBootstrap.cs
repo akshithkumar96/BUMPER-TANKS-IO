@@ -121,6 +121,8 @@ namespace BumperTanks.Gameplay
 
         private static void CreateArenaBounds()
         {
+            var field = new GameObject("Arena Floor");
+            field.AddComponent<ArenaField>();
             CreateWall(new Vector2(0f, 6f), new Vector2(16f, 0.4f));
             CreateWall(new Vector2(0f, -6f), new Vector2(16f, 0.4f));
             CreateWall(new Vector2(8f, 0f), new Vector2(0.4f, 12f));

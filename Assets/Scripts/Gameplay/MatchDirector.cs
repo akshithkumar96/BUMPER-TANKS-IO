@@ -1,3 +1,4 @@
+using BumperTanks.Core;
 using BumperTanks.Match;
 using UnityEngine;
 
@@ -21,12 +22,14 @@ namespace BumperTanks.Gameplay
         public TankController2D Winner => winner;
         public ScoreService Scores => scores;
         public int RemainingPlayers => FindObjectsByType<TankController2D>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).Length;
+        public ArenaBounds Bounds { get; private set; }
 
         private void Awake()
         {
             Instance = this;
             startedAt = Time.time;
             MatchId = System.Guid.NewGuid().ToString("N");
+            Bounds = MatchRules.BoundsAt(0f);
         }
 
         private void OnDestroy()
@@ -70,13 +73,17 @@ namespace BumperTanks.Gameplay
 
         private void ApplyArenaSize()
         {
-            var halfExtent = phase == MatchPhase.FinalZone ? 1.5f : 8f - collapseSteps;
+            Bounds = MatchRules.BoundsAt(Elapsed);
             foreach (var tank in FindObjectsByType<TankController2D>(FindObjectsSortMode.None))
             {
                 var point = tank.transform.position;
-                var clamped = new Vector2(Mathf.Clamp(point.x, -halfExtent, halfExtent), Mathf.Clamp(point.y, -halfExtent + 2f, halfExtent - 2f));
+                var clamped = Bounds.Clamp(point);
                 if ((Vector2)point != clamped) tank.transform.position = clamped;
             }
+            foreach (var gem in FindObjectsByType<GemPickup>(FindObjectsSortMode.None))
+                if (!Bounds.Contains(gem.transform.position)) Destroy(gem.gameObject);
+            foreach (var powerUp in FindObjectsByType<PowerUpPickup>(FindObjectsSortMode.None))
+                if (!Bounds.Contains(powerUp.transform.position)) Destroy(powerUp.gameObject);
         }
 
         private void ResolveWinner()
