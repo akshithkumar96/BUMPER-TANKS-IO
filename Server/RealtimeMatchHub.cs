@@ -356,7 +356,7 @@ public sealed class RealtimeMatchHub : IDisposable
                     {
                         if (disposed || players.Values.All(player => player.IsBot)) return;
                         var realPlayerCount = players.Values.Count(player => !player.IsBot);
-                        if (!started && (realPlayerCount >= 2 || elapsed.Elapsed >= BotFillDelay)) started = true;
+                        if (!started && (realPlayerCount >= MaxPlayersPerRoom || elapsed.Elapsed >= BotFillDelay)) started = true;
                         if (!started) continue;
                         if (!botsFilled && elapsed.Elapsed >= BotFillDelay)
                         {

@@ -121,6 +121,18 @@ def wait_for(client, predicate, timeout=5):
     raise AssertionError("Timed out waiting for realtime server message")
 
 
+def assert_no_snapshot(client, delay=0.35):
+    client.socket.settimeout(delay)
+    try:
+        message = client.receive()
+        if message.get("type") == "snapshot":
+            raise AssertionError("Underfilled room started before the 2.5-second backfill window")
+    except socket.timeout:
+        pass
+    finally:
+        client.socket.settimeout(5)
+
+
 def main():
     address = sys.argv[1].removeprefix("http://").removeprefix("ws://").rstrip("/")
     clients = []
@@ -136,6 +148,7 @@ def main():
         second, second_join = join(address, 2)
         clients.append(second)
         assert second_join["roomId"] == first_join["roomId"], second_join
+        assert_no_snapshot(first)
 
         for index in range(3, 9):
             client, response = join(address, index)
@@ -169,7 +182,18 @@ def main():
                         len(message.get("players", [])) == 8, timeout=4)
         assert len(bots["players"]) == 8, bots
 
-        invalid, _ = join(address, 10)
+        tenth, tenth_join = join(address, 10)
+        clients.append(tenth)
+        eleventh, eleventh_join = join(address, 11)
+        clients.append(eleventh)
+        assert tenth_join["roomId"] == eleventh_join["roomId"], eleventh_join
+        assert_no_snapshot(tenth)
+        two_player_fill = wait_for(tenth, lambda message: message.get("type") == "snapshot" and
+                                   len(message.get("players", [])) == 8, timeout=4)
+        assert len([player for player in two_player_fill["players"] if player["playerId"] > 0]) == 2, two_player_fill
+        assert len([player for player in two_player_fill["players"] if player["playerId"] < 0]) == 6, two_player_fill
+
+        invalid, _ = join(address, 12)
         clients.append(invalid)
         invalid.send({
             "type": "input", "tick": -1,
