@@ -34,7 +34,7 @@ Add a 90-120 second state machine: broad arena/power-ups, 5-second tile collapse
 
 Acceptance criteria: match phases transition at their defined times; arena changes are deterministic; a bot can seek targets and power-ups; a match ends with a winner.
 
-Status: the 90-second phase schedule, shared arena bounds, centered 3×3 sudden-death zone, five-second boundary warnings, out-of-bounds pickup cleanup, phase gem multiplier, phase knockback multiplier, 2.5-second bot fill, and bot pickup seeking are implemented. Matches now end on a sole survivor or at the time limit, resolve time-limit standings by survival, gems, eliminations, and remaining health, then submit the local player result once. Collected power-ups respawn after 12 seconds inside the current arena bounds. Play Mode verification remains.
+Status: the 90-second phase schedule, shared arena bounds, centered 3Ã—3 sudden-death zone, five-second boundary warnings, out-of-bounds pickup cleanup, phase gem multiplier, phase knockback multiplier, 2.5-second bot fill, and bot pickup seeking are implemented. Matches now end on a sole survivor or at the time limit, resolve time-limit standings by survival, gems, eliminations, and remaining health, then submit the local player result once. Collected power-ups respawn after 12 seconds inside the current arena bounds. Play Mode verification remains.
 
 ## Module 4 Multiplayer
 
@@ -52,7 +52,7 @@ Create menu, matchmaking, HUD, results screen, accessibility controls, cosmetic 
 
 Acceptance criteria: full menu-to-rematch journey works on touch and mouse; cosmetics persist; essential UI is screen-reader and contrast reviewed.
 
-Status: front menu, local arena HUD, result/rematch, persistent color and trail garage cosmetics, server-selected daily spin, battle coins, and leaderboard are implemented. Mobile TalkBack/VoiceOver actions cover menu, garage, leaderboard, and tank ability; garage controls use 44-pixel targets, descriptive text, and responsive positioning. Mobile screen-reader access to movement/fire, accessible UI verification on devices, flags, matchmaking UI, and device-scale QA remain.
+Status: front menu, local arena HUD, result/rematch, persistent color and trail garage cosmetics, server-selected daily spin, battle coins, and leaderboard are implemented. Mobile TalkBack/VoiceOver actions cover menu, garage, leaderboard, and tank ability; garage controls use 44-pixel targets, descriptive text, and responsive positioning. Menu, HUD, result, garage, leaderboard, and accessibility action frames honor display safe areas, with Edit Mode coverage for insets and narrow/short layouts. Mobile screen-reader access to movement/fire, accessible UI verification on devices, flags, matchmaking UI, and device-scale QA remain.
 
 ## Module 6 Live Operations
 
@@ -60,7 +60,7 @@ Add approved ad mediation, analytics, consent-aware telemetry, remote tuning, cr
 
 Acceptance criteria: services remain disabled without configured environment-specific credentials; rewards cannot be doubled locally; privacy/consent paths are tested.
 
-Status: profile/reward/leaderboard APIs, persistent JSON storage, match idempotency, basic telemetry, CORS configuration, request throttling, bounded identifier/event validation, and capped telemetry retention are implemented. The Unity client syncs its coin balance from successful server reward responses. Production identity, authoritative match validation, consent flow, and ad mediation remain.
+Status: profile/reward/leaderboard APIs, persistent JSON storage, match idempotency, basic telemetry, CORS configuration, request throttling, bounded identifier/event validation, capped telemetry retention, and production HMAC match attestation enforcement are implemented. The Unity client syncs its coin balance from successful server reward responses. HMAC enforcement requires a trusted authority to sign verified results and is not integrated with live multiplayer yet. Production player identity, durable multi-instance storage, consent flow, and ad mediation remain.
 
 ## Module 7 Release QA
 

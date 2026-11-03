@@ -60,38 +60,41 @@ namespace BumperTanks.Gameplay
 
         private void OnGUI()
         {
+            var safe = GuiSafeAreaLayout.Current;
             if (showFrontMenu)
             {
-                GUI.Box(new Rect(Screen.width * 0.5f - 170f, Screen.height * 0.5f - 120f, 340f, 240f), "BUMPER TANKS IO");
-                GUI.Label(new Rect(Screen.width * 0.5f - 140f, Screen.height * 0.5f - 75f, 280f, 25f), "Top down arena brawler");
-                if (GUI.Button(new Rect(Screen.width * 0.5f - 115f, Screen.height * 0.5f - 30f, 230f, 40f), "Play Arena"))
+                var panel = GuiSafeAreaLayout.Centered(340f, 240f, safe);
+                GUI.Box(panel, "BUMPER TANKS IO");
+                GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 140f, panel.y + 45f, 280f, 25f), safe), "Top down arena brawler");
+                if (GUI.Button(MenuFrame(panel, -115f, -30f, 230f, 40f), "Play Arena"))
                     BeginArena();
-                if (GUI.Button(new Rect(Screen.width * 0.5f - 115f, Screen.height * 0.5f + 20f, 110f, 34f), "Garage (G)"))
+                if (GUI.Button(MenuFrame(panel, -115f, 20f, 110f, 34f), "Garage (G)"))
                 {
                     OpenGarageFromMenu();
                 }
-                if (GUI.Button(new Rect(Screen.width * 0.5f + 5f, Screen.height * 0.5f + 20f, 110f, 34f), "Scores (L)"))
+                if (GUI.Button(MenuFrame(panel, 5f, 20f, 110f, 34f), "Scores (L)"))
                 {
                     OpenLeaderboardFromMenu();
                 }
-                GUI.Label(new Rect(Screen.width * 0.5f - 140f, Screen.height * 0.5f + 68f, 280f, 24f), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
+                GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 140f, panel.y + 188f, 280f, 24f), safe), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
                 return;
             }
-            GUI.Box(new Rect(12, 12, 345, 92), "BUMPER TANKS IO - Offline Arena");
-            GUI.Label(new Rect(25, 40, 320, 24), "Desktop: WASD/arrows, mouse, click release, E, G garage | Mobile: left drag, right release");
-            GUI.Label(new Rect(25, 66, 320, 24), player != null ? $"{player.Archetype}  Health: {player.Health:0}" : "Player eliminated");
-            GUI.Label(new Rect(25, 108, 320, 24), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
-            var overlayY = Screen.height - 56f;
-            if (GUI.Button(new Rect(12, overlayY, 112, 44), "Garage")) OpenGarageFromMatch();
-            if (GUI.Button(new Rect(132, overlayY, 112, 44), "Scores")) OpenLeaderboardFromMatch();
+            GUI.Box(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 4f, safe.y + 4f, 345, 92), safe), "BUMPER TANKS IO - Offline Arena");
+            GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 28f, 320, 24), safe), "Desktop: WASD/arrows, mouse, click release, E, G garage | Mobile: left drag, right release");
+            GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 52f, 320, 24), safe), player != null ? $"{player.Archetype}  Health: {player.Health:0}" : "Player eliminated");
+            GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 94f, 320, 24), safe), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
+            GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 115f, 320, 24), safe), match != null ? $"{match.Phase}  {Mathf.CeilToInt(90f - match.Elapsed):0}s  Tanks: {match.RemainingPlayers}" : string.Empty);
+            var overlayY = safe.yMax - 48f;
+            if (GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 4f, overlayY, 112, 44), safe), "Garage")) OpenGarageFromMatch();
+            if (GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 124f, overlayY, 112, 44), safe), "Scores")) OpenLeaderboardFromMatch();
             if (player != null)
             {
                 var ability = player.GetComponent<TankAbilityController>();
                 if (ability != null)
                 {
-                    GUI.Label(new Rect(25, 129, 320, 24), ability.ReadyIn <= 0f ? "Ability ready (E)" : $"Ability cooldown: {ability.ReadyIn:0.0}s");
+                    GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 136f, 320, 24), safe), ability.ReadyIn <= 0f ? "Ability ready (E)" : $"Ability cooldown: {ability.ReadyIn:0.0}s");
                     if (player.gameObject.activeInHierarchy && match != null && match.Phase != MatchPhase.Complete && match.Winner == null &&
-                        GUI.Button(new Rect(Mathf.Max(12f, Screen.width - 148f), Screen.height - 72f, 136f, 60f), ability.ReadyIn <= 0f ? "ABILITY (E)" : $"READY IN {ability.ReadyIn:0.0}s"))
+                        GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(safe.xMax - 148f, safe.yMax - 68f, 136f, 60f), safe), ability.ReadyIn <= 0f ? "ABILITY (E)" : $"READY IN {ability.ReadyIn:0.0}s"))
                         ability.Activate();
                 }
             }
@@ -99,12 +102,13 @@ namespace BumperTanks.Gameplay
             {
                 var gems = player != null ? match.GemsFor(player) : 0;
                 var eliminations = player != null ? match.Scores.EliminationsFor(player.GetInstanceID()) : 0;
-                GUI.Label(new Rect(25, 87, 320, 24), $"{match.Phase}  {Mathf.CeilToInt(90f - match.Elapsed):0}s  Tanks: {match.RemainingPlayers}  Gems: {gems}  KOs: {eliminations}");
+                GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 157f, 320, 24), safe), $"Gems: {gems}  KOs: {eliminations}");
                 if (match.Winner != null || match.Phase == BumperTanks.Match.MatchPhase.Complete)
                 {
                     var label = match.Winner != null ? $"Winner: {match.Winner.name}" : "Time up";
-                    GUI.Box(new Rect(Screen.width * 0.5f - 145f, Screen.height * 0.5f - 70f, 290f, 140f), label);
-                    if (GUI.Button(new Rect(Screen.width * 0.5f - 80f, Screen.height * 0.5f + 5f, 160f, 36f), "Play Again"))
+                    var panel = GuiSafeAreaLayout.Centered(290f, 140f, safe);
+                    GUI.Box(panel, label);
+                    if (GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 80f, panel.center.y + 5f, 160f, 36f), safe), "Play Again"))
                     {
                         GameServiceClient.Instance?.Track(localPlayerId, "match_rematch");
                         RestartArena();
@@ -166,13 +170,12 @@ namespace BumperTanks.Gameplay
 
         private void ShowMainMenuAccessibility()
         {
-            var centerX = Screen.width * 0.5f;
-            var centerY = Screen.height * 0.5f;
+            var panel = GuiSafeAreaLayout.Centered(340f, 240f, GuiSafeAreaLayout.Current);
             accessibleUi?.ShowScreen("Bumper Tanks main menu", new AccessibleUiAction[]
             {
-                new("Play Arena", "Start the local arena match.", new Rect(centerX - 115f, centerY - 30f, 230f, 40f), BeginArena),
-                new("Garage", "Change tank color or trail and claim the daily reward.", new Rect(centerX - 115f, centerY + 20f, 110f, 34f), OpenGarageFromMenu),
-                new("Leaderboard", "View Battle Coins rankings.", new Rect(centerX + 5f, centerY + 20f, 110f, 34f), OpenLeaderboardFromMenu)
+                new("Play Arena", "Start the local arena match.", MenuFrame(panel, -115f, -30f, 230f, 40f), BeginArena),
+                new("Garage", "Change tank color or trail and claim the daily reward.", MenuFrame(panel, -115f, 20f, 110f, 34f), OpenGarageFromMenu),
+                new("Leaderboard", "View Battle Coins rankings.", MenuFrame(panel, 5f, 20f, 110f, 34f), OpenLeaderboardFromMenu)
             });
         }
 
@@ -184,18 +187,19 @@ namespace BumperTanks.Gameplay
 
         private void ShowMatchAccessibility()
         {
-            var y = Screen.height - 56f;
+            var safe = GuiSafeAreaLayout.Current;
+            var y = safe.yMax - 48f;
             var actions = new System.Collections.Generic.List<AccessibleUiAction>
             {
-                new("Open Garage", "Pause the match and change cosmetics or claim the daily reward.", new Rect(12f, y, 112f, 44f), OpenGarageFromMatch),
-                new("Open Scores", "Pause the match and view Battle Coins rankings.", new Rect(132f, y, 112f, 44f), OpenLeaderboardFromMatch)
+                new("Open Garage", "Pause the match and change cosmetics or claim the daily reward.", GuiSafeAreaLayout.Clamp(new Rect(safe.x + 4f, y, 112f, 44f), safe), OpenGarageFromMatch),
+                new("Open Scores", "Pause the match and view Battle Coins rankings.", GuiSafeAreaLayout.Clamp(new Rect(safe.x + 124f, y, 112f, 44f), safe), OpenLeaderboardFromMatch)
             };
             if (player != null && player.gameObject.activeInHierarchy)
             {
                 var ability = player.GetComponent<TankAbilityController>();
                 if (ability != null)
                 {
-                    var frame = new Rect(Mathf.Max(12f, Screen.width - 148f), Screen.height - 72f, 136f, 60f);
+                    var frame = GuiSafeAreaLayout.Clamp(new Rect(safe.xMax - 148f, safe.yMax - 68f, 136f, 60f), safe);
                     actions.Add(new AccessibleUiAction("Activate tank ability", "Use the archetype ability. It may be on cooldown.", frame, () => ability.Activate()));
                 }
             }
@@ -205,12 +209,17 @@ namespace BumperTanks.Gameplay
         private void ShowResultAccessibility()
         {
             var label = match.Winner != null ? $"Winner: {match.Winner.name}" : "Match complete";
-            var frame = new Rect(Screen.width * 0.5f - 80f, Screen.height * 0.5f + 5f, 160f, 36f);
+            var safe = GuiSafeAreaLayout.Current;
+            var panel = GuiSafeAreaLayout.Centered(290f, 140f, safe);
+            var frame = GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 80f, panel.center.y + 5f, 160f, 36f), safe);
             accessibleUi?.ShowScreen(label, new AccessibleUiAction[]
             {
                 new("Play Again", "Start a fresh arena match.", frame, RestartArena)
             });
         }
+
+        private static Rect MenuFrame(Rect panel, float offsetX, float offsetY, float width, float height) =>
+            GuiSafeAreaLayout.Clamp(new Rect(panel.center.x + offsetX, panel.center.y + offsetY, width, height), GuiSafeAreaLayout.Current);
 
         private static void CreateCamera()
         {
