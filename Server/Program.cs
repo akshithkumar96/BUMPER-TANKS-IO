@@ -15,12 +15,28 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.Wi
 var app = builder.Build();
 var profiles = new ProfileRepository(builder.Configuration);
 var telemetry = new TelemetryRepository(builder.Configuration);
+var realtime = new RealtimeMatchHub();
 var attestationSecret = builder.Configuration["Rewards:MatchAttestationSecret"];
 var requireMatchAttestation = bool.TryParse(builder.Configuration["Rewards:RequireMatchAttestation"], out var configuredAttestationRequirement)
     ? configuredAttestationRequirement
     : !app.Environment.IsDevelopment();
 app.UseCors();
 app.UseRateLimiter();
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(20)
+});
+app.Lifetime.ApplicationStopping.Register(realtime.Dispose);
+app.Map("/v1/realtime", async context =>
+{
+    var origin = context.Request.Headers.Origin.ToString();
+    if (!string.IsNullOrEmpty(origin) && !allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+    await realtime.HandleAsync(context);
+});
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
