@@ -27,13 +27,13 @@ namespace BumperTanks.Frontend
             }, onError));
         }
 
-        public void ClaimDailyReward(string playerId, Action onSuccess = null, Action<string> onError = null)
+        public void ClaimDailyReward(string playerId, Action<int> onSuccess = null, Action<string> onError = null)
         {
             StartCoroutine(PostJsonResponse("/v1/rewards/daily", JsonUtility.ToJson(new DailyReward(playerId)), response =>
             {
-                var profile = JsonUtility.FromJson<ServerProfile>(response);
-                if (profile != null) SetBattleCoins(profile.battleCoins);
-                onSuccess?.Invoke();
+                var result = JsonUtility.FromJson<DailyRewardResponse>(response);
+                if (result?.profile != null) SetBattleCoins(result.profile.battleCoins);
+                onSuccess?.Invoke(result != null ? result.award : 0);
             }, onError));
         }
 
@@ -105,6 +105,9 @@ namespace BumperTanks.Frontend
 
         [Serializable]
         private sealed class MatchCompleteResponse { public ServerProfile profile; }
+
+        [Serializable]
+        private sealed class DailyRewardResponse { public ServerProfile profile; public int award; }
 
         [Serializable]
         private sealed class ServerProfile { public int battleCoins; }

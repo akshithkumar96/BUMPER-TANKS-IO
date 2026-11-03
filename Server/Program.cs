@@ -28,9 +28,9 @@ app.MapPost("/v1/rewards/daily", (DailyRewardRequest request) =>
 {
     if (!RequestValidation.IsPlayerId(request.PlayerId)) return Results.BadRequest(new { error = "invalid playerId" });
     var today = DateOnly.FromDateTime(DateTime.UtcNow);
-    if (!profiles.TryClaimDailyReward(request.PlayerId, today, 50, out var updated))
+    if (!profiles.TryClaimDailyReward(request.PlayerId, today, out var updated, out var reward))
         return Results.Conflict(new { error = "daily reward already claimed" });
-    return Results.Ok(updated);
+    return Results.Ok(new DailyRewardResponse(updated, reward));
 }).RequireRateLimiting("rewards");
 
 app.MapPost("/v1/matches/complete", (MatchCompleteRequest request) =>
@@ -56,6 +56,7 @@ app.Run();
 
 public sealed record PlayerProfile(string PlayerId, int BattleCoins, int MatchesPlayed, DateOnly LastDailyRewardUtc);
 public sealed record DailyRewardRequest(string PlayerId);
+public sealed record DailyRewardResponse(PlayerProfile Profile, int Award);
 public sealed record MatchCompleteRequest(string PlayerId, string MatchId, int Gems, int Eliminations);
 public sealed record TelemetryRequest(string PlayerId, string Name);
 public sealed record LeaderboardResponse(PlayerProfile[] Entries);

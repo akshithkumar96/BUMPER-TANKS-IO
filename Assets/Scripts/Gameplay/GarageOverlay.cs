@@ -10,6 +10,7 @@ namespace BumperTanks.Gameplay
         private TankController2D player;
         private string playerId;
         private string dailyRewardMessage = string.Empty;
+        private bool dailyRewardPending;
 
         private void Start()
         {
@@ -29,23 +30,42 @@ namespace BumperTanks.Gameplay
         private void OnGUI()
         {
             if (!open) return;
-            GUI.Box(new Rect(Screen.width - 230, 12, 218, 246), "Garage");
+            GUI.Box(new Rect(Screen.width - 230, 12, 218, 278), "Garage");
             GUI.Label(new Rect(Screen.width - 210, 42, 180, 20), "Choose tank color");
             ColorButton("sky", new Color(0.15f, 0.75f, 1f), 70);
             ColorButton("coral", new Color(1f, 0.35f, 0.3f), 105);
             ColorButton("lime", new Color(0.35f, 1f, 0.45f), 140);
-            if (GUI.Button(new Rect(Screen.width - 210, 175, 178, 28), "Claim daily 50 coins"))
+            GUI.Label(new Rect(Screen.width - 210, 168, 190, 20), "Daily spin: 25 / 50 / 75 / 100");
+            GUI.enabled = !dailyRewardPending;
+            if (GUI.Button(new Rect(Screen.width - 210, 192, 178, 28), dailyRewardPending ? "Spinning..." : "Spin daily reward"))
             {
-                GameServiceClient.Instance?.ClaimDailyReward(playerId, () =>
+                dailyRewardPending = true;
+                dailyRewardMessage = string.Empty;
+                var client = GameServiceClient.Instance;
+                if (client == null)
                 {
-                    profile = ProfileStore.Load();
-                    profile.DailySpinDay = System.DateTime.UtcNow.DayOfYear;
-                    ProfileStore.Save(profile);
-                    dailyRewardMessage = "Daily reward claimed.";
-                }, _ => dailyRewardMessage = "Reward unavailable. Try again later.");
+                    dailyRewardPending = false;
+                    dailyRewardMessage = "Service unavailable. Try again later.";
+                }
+                else
+                {
+                    client.ClaimDailyReward(playerId, reward =>
+                    {
+                        profile = ProfileStore.Load();
+                        profile.DailySpinDay = System.DateTime.UtcNow.DayOfYear;
+                        ProfileStore.Save(profile);
+                        dailyRewardPending = false;
+                        dailyRewardMessage = $"Won {reward} Battle Coins!";
+                    }, _ =>
+                    {
+                        dailyRewardPending = false;
+                        dailyRewardMessage = "Unavailable. Try again later.";
+                    });
+                }
             }
-            if (!string.IsNullOrEmpty(dailyRewardMessage)) GUI.Label(new Rect(Screen.width - 210, 203, 178, 20), dailyRewardMessage);
-            if (GUI.Button(new Rect(Screen.width - 210, 229, 178, 28), "Back to main menu"))
+            GUI.enabled = true;
+            if (!string.IsNullOrEmpty(dailyRewardMessage)) GUI.Label(new Rect(Screen.width - 210, 223, 190, 20), dailyRewardMessage);
+            if (GUI.Button(new Rect(Screen.width - 210, 251, 178, 28), "Back to main menu"))
             {
                 open = false;
                 SendMessage("ShowFrontMenu", SendMessageOptions.DontRequireReceiver);

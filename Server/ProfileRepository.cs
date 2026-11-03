@@ -29,7 +29,7 @@ public sealed class ProfileRepository
         lock (writeLock) PersistLocked();
     }
 
-    public bool TryClaimDailyReward(string playerId, DateOnly today, int reward, out PlayerProfile updated)
+    public bool TryClaimDailyReward(string playerId, DateOnly today, out PlayerProfile updated, out int reward)
     {
         lock (writeLock)
         {
@@ -37,8 +37,11 @@ public sealed class ProfileRepository
             if (current.LastDailyRewardUtc == today)
             {
                 updated = current;
+                reward = 0;
                 return false;
             }
+            var rewards = new[] { 25, 50, 75, 100 };
+            reward = rewards[Random.Shared.Next(rewards.Length)];
             updated = current with { BattleCoins = (int)Math.Min(int.MaxValue, (long)current.BattleCoins + reward), LastDailyRewardUtc = today };
             profiles[playerId] = updated;
             PersistLocked();
