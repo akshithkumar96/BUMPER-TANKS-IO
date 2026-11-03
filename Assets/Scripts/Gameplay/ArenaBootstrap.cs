@@ -99,7 +99,6 @@ namespace BumperTanks.Gameplay
                     GUI.Box(new Rect(Screen.width * 0.5f - 145f, Screen.height * 0.5f - 70f, 290f, 140f), label);
                     if (GUI.Button(new Rect(Screen.width * 0.5f - 80f, Screen.height * 0.5f + 5f, 160f, 36f), "Play Again"))
                     {
-                        if (player != null) GameServiceClient.Instance.SubmitMatch(localPlayerId, match.MatchId, match.GemsFor(player), match.Scores.EliminationsFor(player.GetInstanceID()));
                         GameServiceClient.Instance?.Track(localPlayerId, "match_rematch");
                         Time.timeScale = 1f;
                         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);

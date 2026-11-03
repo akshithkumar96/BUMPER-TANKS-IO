@@ -13,6 +13,7 @@ namespace BumperTanks.Gameplay
         private readonly BotFillService botFill = new();
         private readonly ScoreService scores = new();
         private bool filledBots;
+        private bool resultSubmitted;
         private TankController2D winner;
 
         public float Elapsed => Time.time - startedAt;
@@ -56,7 +57,11 @@ namespace BumperTanks.Gameplay
             FillBotsWhenDue();
             ApplyArenaSize();
             ResolveWinner();
-            if (phase == MatchPhase.Complete || winner != null) Time.timeScale = 0f;
+            if (phase == MatchPhase.Complete || winner != null)
+            {
+                SubmitResultOnce();
+                Time.timeScale = 0f;
+            }
         }
 
         private void FillBotsWhenDue()
@@ -89,7 +94,41 @@ namespace BumperTanks.Gameplay
         private void ResolveWinner()
         {
             var alive = FindObjectsByType<TankController2D>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            if (alive.Length == 1) winner = alive[0];
+            if (alive.Length == 1)
+            {
+                winner = alive[0];
+                return;
+            }
+            if (phase != MatchPhase.Complete) return;
+
+            var participants = FindObjectsByType<TankController2D>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var participant in participants)
+            {
+                if (winner == null || IsHigherStanding(participant, winner)) winner = participant;
+            }
+        }
+
+        private bool IsHigherStanding(TankController2D candidate, TankController2D current)
+        {
+            var comparison = MatchRules.CompareStanding(
+                candidate.gameObject.activeInHierarchy, Scores.GemsFor(candidate.GetInstanceID()), Scores.EliminationsFor(candidate.GetInstanceID()), candidate.Health,
+                current.gameObject.activeInHierarchy, Scores.GemsFor(current.GetInstanceID()), Scores.EliminationsFor(current.GetInstanceID()), current.Health);
+            return comparison > 0 || (comparison == 0 && candidate.GetInstanceID() < current.GetInstanceID());
+        }
+
+        private void SubmitResultOnce()
+        {
+            if (resultSubmitted) return;
+            resultSubmitted = true;
+            var player = FindObjectsByType<TankController2D>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var participant in player)
+            {
+                if (!participant.IsPlayer) continue;
+                var playerId = BumperTanks.Frontend.ProfileStore.GetOrCreatePlayerId();
+                BumperTanks.Frontend.GameServiceClient.Instance?.SubmitMatch(playerId, MatchId,
+                    Scores.GemsFor(participant.GetInstanceID()), Scores.EliminationsFor(participant.GetInstanceID()));
+                break;
+            }
         }
     }
 }

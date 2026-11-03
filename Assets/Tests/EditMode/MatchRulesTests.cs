@@ -32,6 +32,15 @@ namespace BumperTanks.Tests
         }
 
         [Test]
+        public void StandingPrefersAliveThenGemsEliminationsAndHealth()
+        {
+            Assert.That(MatchRules.CompareStanding(true, 0, 0, 1, false, 100, 10, 100), Is.GreaterThan(0));
+            Assert.That(MatchRules.CompareStanding(false, 8, 0, 1, false, 7, 10, 100), Is.GreaterThan(0));
+            Assert.That(MatchRules.CompareStanding(false, 8, 2, 1, false, 8, 1, 100), Is.GreaterThan(0));
+            Assert.That(MatchRules.CompareStanding(false, 8, 2, 70, false, 8, 2, 20), Is.GreaterThan(0));
+        }
+
+        [Test]
         public void ArenaBoundsCollapseToTheCenteredThreeByThreeZone()
         {
             var open = MatchRules.BoundsAt(0f);
