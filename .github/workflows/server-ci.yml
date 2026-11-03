@@ -68,4 +68,4 @@ jobs:
           test "$healthy" = true
           profile=$(curl --fail --silent --show-error "http://127.0.0.1:5188/v1/profiles/$player_id")
           echo "$profile" | jq -e '.matchesPlayed == 1'
-          jq -e 'length == 1 and .[0].name == "match_started"' "$Storage__TelemetryPath"
+          jq -e 'length == 1 and .[0].Name == "match_started"' "$Storage__TelemetryPath"
