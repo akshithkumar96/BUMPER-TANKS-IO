@@ -58,6 +58,18 @@ jobs:
           attestation=$(printf '%s' "$attestation_payload" | openssl dgst -sha256 -hmac "$Rewards__MatchAttestationSecret" -binary | xxd -p -c 256)
           match=$(curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -H "X-Match-Attestation: $attestation" -d "$match_body")
           echo "$match" | jq -e '.award == 27 and .profile.matchesPlayed == 1'
+          catalog=$(curl --fail --silent --show-error http://127.0.0.1:5188/v1/cosmetics)
+          echo "$catalog" | jq -e 'any(.items[]; .id == "flag_checkered" and .category == "flag" and .price == 20)'
+          purchase_body=$(jq -n --arg player "$player_id" '{playerId:$player,cosmeticId:"flag_checkered"}')
+          purchase=$(curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/cosmetics/purchase -H 'Content-Type: application/json' -d "$purchase_body")
+          echo "$purchase" | jq -e '.cosmeticId == "flag_checkered" and .profile.ownedCosmetics == ["flag_checkered"]'
+          echo "$purchase" | jq --argjson daily_award "$(echo "$daily" | jq -r '.award')" -e '.profile.battleCoins == $daily_award + 7'
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/cosmetics/purchase -H 'Content-Type: application/json' -d "$purchase_body")
+          test "$status" = "409"
+          poor_player_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          insufficient_purchase=$(jq -n --arg player "$poor_player_id" '{playerId:$player,cosmeticId:"flag_comet"}')
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/cosmetics/purchase -H 'Content-Type: application/json' -d "$insufficient_purchase")
+          test "$status" = "409"
           tampered_match_body=$(jq -n --arg player "$player_id" --arg match "$match_id" '{playerId:$player,matchId:$match,gems:8,eliminations:2}')
           status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -H "X-Match-Attestation: $attestation" -d "$tampered_match_body")
           test "$status" = "403"
@@ -80,5 +92,5 @@ jobs:
           for i in {1..10}; do if curl --fail --silent http://127.0.0.1:5188/health; then healthy=true; break; fi; sleep 1; done
           test "$healthy" = true
           profile=$(curl --fail --silent --show-error "http://127.0.0.1:5188/v1/profiles/$player_id")
-          echo "$profile" | jq -e '.matchesPlayed == 1'
+          echo "$profile" | jq -e '.matchesPlayed == 1 and .ownedCosmetics == ["flag_checkered"]'
           jq -e 'length == 1 and .[0].Name == "match_started"' "$Storage__TelemetryPath"

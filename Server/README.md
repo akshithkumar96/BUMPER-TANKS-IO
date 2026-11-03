@@ -2,7 +2,9 @@
 
 Run locally with `dotnet run --project Server/BumperTanks.Server.csproj`.
 
-Endpoints: `GET /health`, `GET /v1/profiles/{playerId}`, `POST /v1/rewards/daily`, `POST /v1/matches/complete`, `GET /v1/leaderboard`, and WebSocket `/v1/realtime`.
+Endpoints: `GET /health`, `GET /v1/profiles/{playerId}`, `POST /v1/rewards/daily`, `GET /v1/cosmetics`, `POST /v1/cosmetics/purchase`, `POST /v1/matches/complete`, `GET /v1/leaderboard`, and WebSocket `/v1/realtime`.
+
+The cosmetic catalog and prices live on the server. Purchases atomically debit Battle Coins, record ownership in the persisted profile, reject duplicates, and reject insufficient balances. The Unity garage reads the catalog and owned items from the service; its cosmetic selection only chooses among owned flags and sounds. This purchasing API currently uses the client-supplied player ID and therefore still needs production player authentication.
 
 ## Realtime prototype
 

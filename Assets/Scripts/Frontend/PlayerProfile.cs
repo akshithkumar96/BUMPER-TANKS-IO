@@ -9,6 +9,9 @@ namespace BumperTanks.Frontend
         public int BattleCoins;
         public string ColorId = "sky";
         public string TrailId = "none";
+        public string FlagId = "none";
+        public string BumpSoundId = "impact";
+        public string[] OwnedCosmetics = Array.Empty<string>();
         public int DailySpinDay = -1;
     }
 
@@ -30,7 +33,9 @@ namespace BumperTanks.Frontend
         public static PlayerProfile Load()
         {
             var stored = PlayerPrefs.GetString(ProfileKey, string.Empty);
-            return string.IsNullOrWhiteSpace(stored) ? new PlayerProfile() : JsonUtility.FromJson<PlayerProfile>(stored) ?? new PlayerProfile();
+            var profile = string.IsNullOrWhiteSpace(stored) ? new PlayerProfile() : JsonUtility.FromJson<PlayerProfile>(stored) ?? new PlayerProfile();
+            profile.OwnedCosmetics ??= Array.Empty<string>();
+            return profile;
         }
 
         public static void Save(PlayerProfile profile)

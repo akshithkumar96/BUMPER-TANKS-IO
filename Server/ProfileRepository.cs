@@ -73,6 +73,42 @@ public sealed class ProfileRepository
         }
     }
 
+    public bool TryPurchaseCosmetic(string playerId, string cosmeticId, out PlayerProfile updated, out string error)
+    {
+        lock (writeLock)
+        {
+            var current = GetOrCreate(playerId);
+            if (!CosmeticCatalog.TryGet(cosmeticId, out var item))
+            {
+                updated = current;
+                error = "unknown cosmetic";
+                return false;
+            }
+            if (current.OwnedCosmetics.Contains(cosmeticId, StringComparer.Ordinal))
+            {
+                updated = current;
+                error = "cosmetic already owned";
+                return false;
+            }
+            if (current.BattleCoins < item.Price)
+            {
+                updated = current;
+                error = "not enough Battle Coins";
+                return false;
+            }
+
+            updated = current with
+            {
+                BattleCoins = current.BattleCoins - item.Price,
+                OwnedCosmetics = current.OwnedCosmetics.Append(cosmeticId).ToArray()
+            };
+            profiles[playerId] = updated;
+            PersistLocked();
+            error = string.Empty;
+            return true;
+        }
+    }
+
     private void PersistLocked()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

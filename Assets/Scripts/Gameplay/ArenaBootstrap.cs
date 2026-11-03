@@ -230,6 +230,7 @@ namespace BumperTanks.Gameplay
             camera.orthographicSize = 7f;
             cameraObject.transform.position = new Vector3(0f, 0f, -10f);
             camera.backgroundColor = new Color(0.035f, 0.06f, 0.1f);
+            cameraObject.AddComponent<AudioListener>();
         }
 
         private static void CreateArenaBounds()
@@ -281,6 +282,12 @@ namespace BumperTanks.Gameplay
             var controller = tank.AddComponent<TankController2D>();
             controller.Configure(archetype, isPlayer);
             tank.AddComponent<TankAbilityController>();
+            var cosmetics = tank.AddComponent<TankCosmeticView>();
+            if (isPlayer)
+            {
+                var profile = ProfileStore.Load();
+                cosmetics.Configure(profile.FlagId, profile.BumpSoundId);
+            }
             return controller;
         }
     }

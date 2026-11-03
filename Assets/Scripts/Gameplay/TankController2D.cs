@@ -229,6 +229,9 @@ namespace BumperTanks.Gameplay
             var other = collision.collider.GetComponent<TankController2D>();
             if (other == null || other == this || GetInstanceID() > other.GetInstanceID()) return;
 
+            GetComponent<TankCosmeticView>()?.PlayBump(collision.relativeVelocity.magnitude);
+            other.GetComponent<TankCosmeticView>()?.PlayBump(collision.relativeVelocity.magnitude);
+
             var source = this;
             var target = other;
             if (other.BumpKnockbackMultiplier > BumpKnockbackMultiplier ||

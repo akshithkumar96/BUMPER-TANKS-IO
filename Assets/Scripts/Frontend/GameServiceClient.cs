@@ -23,7 +23,7 @@ namespace BumperTanks.Frontend
             StartCoroutine(PostJsonResponse("/v1/matches/complete", JsonUtility.ToJson(new MatchResult(playerId, matchId, gems, eliminations)), response =>
             {
                 var result = JsonUtility.FromJson<MatchCompleteResponse>(response);
-                if (result?.profile != null) SetBattleCoins(result.profile.battleCoins);
+                if (result?.profile != null) SetServerProfile(result.profile);
             }, onError));
         }
 
@@ -32,7 +32,7 @@ namespace BumperTanks.Frontend
             StartCoroutine(PostJsonResponse("/v1/rewards/daily", JsonUtility.ToJson(new DailyReward(playerId)), response =>
             {
                 var result = JsonUtility.FromJson<DailyRewardResponse>(response);
-                if (result?.profile != null) SetBattleCoins(result.profile.battleCoins);
+                if (result?.profile != null) SetServerProfile(result.profile);
                 onSuccess?.Invoke(result != null ? result.award : 0);
             }, onError));
         }
@@ -45,6 +45,26 @@ namespace BumperTanks.Frontend
         public void FetchLeaderboard(Action<LeaderboardEntry[]> onComplete, Action<string> onError = null)
         {
             StartCoroutine(GetJson("/v1/leaderboard", json => onComplete?.Invoke(JsonUtility.FromJson<LeaderboardPayload>(json)?.entries ?? Array.Empty<LeaderboardEntry>()), onError));
+        }
+
+        public void FetchCosmeticCatalog(Action<CosmeticEntry[]> onComplete, Action<string> onError = null)
+        {
+            StartCoroutine(GetJson("/v1/cosmetics", json =>
+                onComplete?.Invoke(JsonUtility.FromJson<CosmeticCatalogPayload>(json)?.items ?? Array.Empty<CosmeticEntry>()), onError));
+        }
+
+        public void PurchaseCosmetic(string playerId, string cosmeticId, Action<ServerProfile> onSuccess = null, Action<string> onError = null)
+        {
+            StartCoroutine(PostJsonResponse("/v1/cosmetics/purchase", JsonUtility.ToJson(new CosmeticPurchase(playerId, cosmeticId)), response =>
+            {
+                var result = JsonUtility.FromJson<CosmeticPurchaseResponse>(response);
+                if (result?.profile != null)
+                {
+                    SetServerProfile(result.profile);
+                    onSuccess?.Invoke(result.profile);
+                }
+                else onError?.Invoke("Invalid cosmetic purchase response.");
+            }, onError));
         }
 
         private IEnumerator PostJson(string path, string json, Action<string> onError) => PostJsonResponse(path, json, null, onError);
@@ -60,10 +80,11 @@ namespace BumperTanks.Frontend
             else onSuccess?.Invoke(request.downloadHandler.text);
         }
 
-        private static void SetBattleCoins(int battleCoins)
+        private static void SetServerProfile(ServerProfile serverProfile)
         {
             var profile = ProfileStore.Load();
-            profile.BattleCoins = battleCoins;
+            profile.BattleCoins = serverProfile.battleCoins;
+            if (serverProfile.ownedCosmetics != null) profile.OwnedCosmetics = serverProfile.ownedCosmetics;
             ProfileStore.Save(profile);
         }
 
@@ -110,7 +131,15 @@ namespace BumperTanks.Frontend
         private sealed class DailyRewardResponse { public ServerProfile profile; public int award; }
 
         [Serializable]
-        private sealed class ServerProfile { public int battleCoins; }
+        public sealed class ServerProfile { public int battleCoins; public string[] ownedCosmetics; }
+        [Serializable]
+        public sealed class CosmeticEntry { public string id; public string category; public int price; }
+        [Serializable]
+        private sealed class CosmeticPurchase { public string PlayerId; public string CosmeticId; public CosmeticPurchase(string playerId, string cosmeticId) => (PlayerId, CosmeticId) = (playerId, cosmeticId); }
+        [Serializable]
+        private sealed class CosmeticCatalogPayload { public CosmeticEntry[] items; }
+        [Serializable]
+        private sealed class CosmeticPurchaseResponse { public ServerProfile profile; public string cosmeticId; }
 
         [Serializable]
         public sealed class LeaderboardEntry { public string playerId; public int battleCoins; public int matchesPlayed; }

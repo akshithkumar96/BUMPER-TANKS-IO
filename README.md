@@ -1,6 +1,6 @@
 # Bumper Tanks IO
 
-Top-down arena brawler for desktop, mobile, and WebGL. The project uses Unity 6, URP, C#, an ASP.NET Core game service, and a Photon Fusion Shared Mode integration boundary.
+Top-down arena brawler for desktop, mobile, and WebGL. The project uses Unity 6, URP, C#, an ASP.NET Core game service, and a first-party WebSocket relay for realtime sessions.
 
 ## Run locally
 
@@ -18,6 +18,6 @@ The service exposes health, profile, reward, match-completion, and leaderboard e
 
 ## Multiplayer
 
-The project includes deterministic session contracts and a Fusion Shared Mode adapter behind the `FUSION_PRESENT` scripting define. Follow [Fusion setup](docs/fusion-setup.md) after importing Photon Fusion 2 and configuring an AppId.
+The project includes a native `ClientWebSocket` client and a browser WebSocket bridge for WebGL. The server hosts eight-player rooms, fills missing slots with bots after 2.5 seconds, and broadcasts 30 Hz snapshots. See [server setup](Server/README.md) and the [implementation plan](docs/implementation-plan.md) for current integration status. The optional Fusion adapter is legacy scaffolding and is not needed to run the selected relay path.
 
 See [the implementation plan](docs/implementation-plan.md) for the delivery roadmap.

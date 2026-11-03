@@ -30,6 +30,17 @@ namespace BumperTanks.Tests
         }
 
         [Test]
+        public void FlagAndBumpSoundChoicesSurviveProfileSerialization()
+        {
+            var profile = new PlayerProfile { FlagId = "flag_checkered", BumpSoundId = "sound_arcade", OwnedCosmetics = new[] { "flag_checkered", "sound_arcade" } };
+            var restored = UnityEngine.JsonUtility.FromJson<PlayerProfile>(UnityEngine.JsonUtility.ToJson(profile));
+
+            Assert.That(restored.FlagId, Is.EqualTo("flag_checkered"));
+            Assert.That(restored.BumpSoundId, Is.EqualTo("sound_arcade"));
+            Assert.That(restored.OwnedCosmetics, Is.EqualTo(new[] { "flag_checkered", "sound_arcade" }));
+        }
+
+        [Test]
         public void AccessibleFramesConvertImmediateGuiCoordinatesToScreenCoordinates()
         {
             var frame = AccessibleUiFrames.ToScreen(new UnityEngine.Rect(12f, 20f, 112f, 44f), 640f);

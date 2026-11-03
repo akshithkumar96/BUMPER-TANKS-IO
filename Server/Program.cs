@@ -55,6 +55,17 @@ app.MapPost("/v1/rewards/daily", (DailyRewardRequest request) =>
     return Results.Ok(new DailyRewardResponse(updated, reward));
 }).RequireRateLimiting("rewards");
 
+app.MapGet("/v1/cosmetics", () => Results.Ok(new CosmeticCatalogResponse(CosmeticCatalog.All.ToArray())));
+
+app.MapPost("/v1/cosmetics/purchase", (CosmeticPurchaseRequest request) =>
+{
+    if (!RequestValidation.IsPlayerId(request.PlayerId) || !CosmeticCatalog.TryGet(request.CosmeticId, out _))
+        return Results.BadRequest(new { error = "invalid cosmetic purchase" });
+    if (!profiles.TryPurchaseCosmetic(request.PlayerId, request.CosmeticId, out var updated, out var error))
+        return Results.Conflict(new { error });
+    return Results.Ok(new CosmeticPurchaseResponse(updated, request.CosmeticId));
+}).RequireRateLimiting("rewards");
+
 app.MapPost("/v1/matches/complete", (MatchCompleteRequest request, HttpRequest httpRequest) =>
 {
     if (!RequestValidation.IsPlayerId(request.PlayerId) || !RequestValidation.IsMatchId(request.MatchId) || request.Gems is < 0 or > 1000 || request.Eliminations is < 0 or > 7)
@@ -86,9 +97,15 @@ app.MapPost("/v1/telemetry", (TelemetryRequest request) =>
 app.MapGet("/v1/leaderboard", () => Results.Ok(new LeaderboardResponse(profiles.All.OrderByDescending(profile => profile.BattleCoins).Take(50).ToArray())));
 app.Run();
 
-public sealed record PlayerProfile(string PlayerId, int BattleCoins, int MatchesPlayed, DateOnly LastDailyRewardUtc);
+public sealed record PlayerProfile(string PlayerId, int BattleCoins, int MatchesPlayed, DateOnly LastDailyRewardUtc)
+{
+    public string[] OwnedCosmetics { get; init; } = Array.Empty<string>();
+}
 public sealed record DailyRewardRequest(string PlayerId);
 public sealed record DailyRewardResponse(PlayerProfile Profile, int Award);
+public sealed record CosmeticPurchaseRequest(string PlayerId, string CosmeticId);
+public sealed record CosmeticPurchaseResponse(PlayerProfile Profile, string CosmeticId);
+public sealed record CosmeticCatalogResponse(CosmeticDefinition[] Items);
 public sealed record MatchCompleteRequest(string PlayerId, string MatchId, int Gems, int Eliminations);
 public sealed record TelemetryRequest(string PlayerId, string Name);
 public sealed record LeaderboardResponse(PlayerProfile[] Entries);
