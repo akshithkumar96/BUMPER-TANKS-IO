@@ -27,6 +27,9 @@ jobs:
           set -euo pipefail
           export Storage__ProfilePath="$RUNNER_TEMP/bumper-profiles.json"
           export Storage__TelemetryPath="$RUNNER_TEMP/bumper-telemetry.json"
+          export ASPNETCORE_ENVIRONMENT=Production
+          export Rewards__RequireMatchAttestation=true
+          export Rewards__MatchAttestationSecret=ci-only-match-attestation-secret-32-bytes-minimum
           dotnet run --no-build --configuration Release --urls http://127.0.0.1:5188 &
           service_pid=$!
           trap 'kill "$service_pid" 2>/dev/null || true' EXIT
@@ -46,9 +49,18 @@ jobs:
           status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/rewards/daily -H 'Content-Type: application/json' -d "$daily_body")
           test "$status" = "409"
           match_body=$(jq -n --arg player "$player_id" --arg match "$match_id" '{playerId:$player,matchId:$match,gems:7,eliminations:2}')
-          match=$(curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -d "$match_body")
-          echo "$match" | jq -e '.award == 27 and .profile.matchesPlayed == 1'
           status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -d "$match_body")
+          test "$status" = "401"
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -H 'X-Match-Attestation: invalid' -d "$match_body")
+          test "$status" = "403"
+          attestation_payload=$(printf '%s\n%s\n%d\n%d' "$player_id" "$match_id" 7 2)
+          attestation=$(printf '%s' "$attestation_payload" | openssl dgst -sha256 -hmac "$Rewards__MatchAttestationSecret" -binary | xxd -p -c 256)
+          match=$(curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -H "X-Match-Attestation: $attestation" -d "$match_body")
+          echo "$match" | jq -e '.award == 27 and .profile.matchesPlayed == 1'
+          tampered_match_body=$(jq -n --arg player "$player_id" --arg match "$match_id" '{playerId:$player,matchId:$match,gems:8,eliminations:2}')
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -H "X-Match-Attestation: $attestation" -d "$tampered_match_body")
+          test "$status" = "403"
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -H "X-Match-Attestation: $attestation" -d "$match_body")
           test "$status" = "409"
           invalid_match_body=$(jq -n --arg player "$player_id" --arg match "$match_id" '{playerId:$player,matchId:$match,gems:1001,eliminations:0}')
           status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -d "$invalid_match_body")

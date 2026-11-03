@@ -13,6 +13,10 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.Wi
 var app = builder.Build();
 var profiles = new ProfileRepository(builder.Configuration);
 var telemetry = new TelemetryRepository(builder.Configuration);
+var attestationSecret = builder.Configuration["Rewards:MatchAttestationSecret"];
+var requireMatchAttestation = bool.TryParse(builder.Configuration["Rewards:RequireMatchAttestation"], out var configuredAttestationRequirement)
+    ? configuredAttestationRequirement
+    : !app.Environment.IsDevelopment();
 app.UseCors();
 app.UseRateLimiter();
 
@@ -33,10 +37,20 @@ app.MapPost("/v1/rewards/daily", (DailyRewardRequest request) =>
     return Results.Ok(new DailyRewardResponse(updated, reward));
 }).RequireRateLimiting("rewards");
 
-app.MapPost("/v1/matches/complete", (MatchCompleteRequest request) =>
+app.MapPost("/v1/matches/complete", (MatchCompleteRequest request, HttpRequest httpRequest) =>
 {
     if (!RequestValidation.IsPlayerId(request.PlayerId) || !RequestValidation.IsMatchId(request.MatchId) || request.Gems is < 0 or > 1000 || request.Eliminations is < 0 or > 7)
         return Results.BadRequest(new { error = "invalid match result" });
+
+    if (requireMatchAttestation)
+    {
+        if (!MatchOutcomeAttestation.IsConfigured(attestationSecret))
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        var signature = httpRequest.Headers["X-Match-Attestation"].FirstOrDefault();
+        if (string.IsNullOrEmpty(signature)) return Results.Unauthorized();
+        if (!MatchOutcomeAttestation.Verify(attestationSecret, request, signature))
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
 
     if (!profiles.TryCompleteMatch(request.PlayerId, request.MatchId, request.Gems, request.Eliminations, out var updated, out var award))
         return Results.Conflict(new { error = "match result already submitted" });
