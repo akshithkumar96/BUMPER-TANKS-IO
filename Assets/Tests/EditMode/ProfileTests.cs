@@ -18,5 +18,14 @@ namespace BumperTanks.Tests
             Assert.That(playerId, Does.Match("^[a-f0-9]{32}$"));
             Assert.That(ProfileStore.GetOrCreatePlayerId(), Is.EqualTo(playerId));
         }
+
+        [Test]
+        public void TrailCosmeticChoiceSurvivesProfileSerialization()
+        {
+            var profile = new PlayerProfile { TrailId = "neon" };
+            var restored = UnityEngine.JsonUtility.FromJson<PlayerProfile>(UnityEngine.JsonUtility.ToJson(profile));
+
+            Assert.That(restored.TrailId, Is.EqualTo("neon"));
+        }
     }
 }
