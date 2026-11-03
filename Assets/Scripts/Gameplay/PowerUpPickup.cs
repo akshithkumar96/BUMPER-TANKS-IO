@@ -23,6 +23,7 @@ namespace BumperTanks.Gameplay
             var tank = other.GetComponent<TankController2D>();
             if (tank == null) return;
             tank.ApplyPowerUp(Type);
+            MatchDirector.Instance?.SchedulePowerUpRespawn(Type);
             Destroy(gameObject);
         }
     }

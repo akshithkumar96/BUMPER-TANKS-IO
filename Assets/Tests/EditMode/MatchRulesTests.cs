@@ -73,5 +73,21 @@ namespace BumperTanks.Tests
             Assert.That(fill.BotsRequired(3), Is.EqualTo(5));
             Assert.That(fill.BotsRequired(8), Is.Zero);
         }
+
+        [Test]
+        public void CollectedPowerUpsBecomeAvailableAgainAfterTheirRespawnDelay()
+        {
+            var respawns = new PowerUpRespawnService();
+            respawns.Schedule(PowerUpType.Nitro, 12f);
+            respawns.Schedule(PowerUpType.Magnet, 18f);
+
+            Assert.That(respawns.TryTakeDue(11.99f, out _), Is.False);
+            Assert.That(respawns.TryTakeDue(12f, out var first), Is.True);
+            Assert.That(first, Is.EqualTo(PowerUpType.Nitro));
+            Assert.That(respawns.PendingCount, Is.EqualTo(1));
+            Assert.That(respawns.TryTakeDue(18f, out var second), Is.True);
+            Assert.That(second, Is.EqualTo(PowerUpType.Magnet));
+            Assert.That(respawns.PendingCount, Is.Zero);
+        }
     }
 }

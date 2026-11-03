@@ -152,7 +152,7 @@ namespace BumperTanks.Gameplay
             return CreateTank(name, position, archetype, false, new Color(0.85f, 0.35f, 0.45f));
         }
 
-        private static void CreatePowerUp(Vector2 position, PowerUpType type, Color color)
+        public static void CreatePowerUp(Vector2 position, PowerUpType type, Color color)
         {
             var pickup = new GameObject(type.ToString());
             pickup.transform.position = position;

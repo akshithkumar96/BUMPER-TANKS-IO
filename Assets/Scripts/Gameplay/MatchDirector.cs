@@ -11,6 +11,7 @@ namespace BumperTanks.Gameplay
         private MatchPhase phase;
         private int collapseSteps;
         private readonly BotFillService botFill = new();
+        private readonly PowerUpRespawnService powerUpRespawns = new();
         private readonly ScoreService scores = new();
         private bool filledBots;
         private bool resultSubmitted;
@@ -50,11 +51,17 @@ namespace BumperTanks.Gameplay
             if (tank != null) Scores.AwardElimination(tank.GetInstanceID());
         }
 
+        public void SchedulePowerUpRespawn(PowerUpType type, float delaySeconds = 12f)
+        {
+            powerUpRespawns.Schedule(type, Elapsed + Mathf.Max(0f, delaySeconds));
+        }
+
         private void Update()
         {
             phase = MatchRules.PhaseAt(Elapsed);
             collapseSteps = MatchRules.CollapseStepsAt(Elapsed);
             FillBotsWhenDue();
+            RespawnPowerUpsWhenDue();
             ApplyArenaSize();
             ResolveWinner();
             if (phase == MatchPhase.Complete || winner != null)
@@ -75,6 +82,23 @@ namespace BumperTanks.Gameplay
             }
             filledBots = true;
         }
+
+        private void RespawnPowerUpsWhenDue()
+        {
+            while (powerUpRespawns.TryTakeDue(Elapsed, out var type))
+            {
+                var half = Bounds.Size * 0.5f;
+                var position = new Vector2(Random.Range(-half.x, half.x), Random.Range(-half.y, half.y));
+                ArenaBootstrap.CreatePowerUp(position, type, PowerUpColor(type));
+            }
+        }
+
+        private static Color PowerUpColor(PowerUpType type) => type switch
+        {
+            PowerUpType.Nitro => new Color(1f, 0.9f, 0.1f),
+            PowerUpType.MegaBullet => new Color(1f, 0.25f, 0.25f),
+            _ => new Color(0.3f, 1f, 0.45f)
+        };
 
         private void ApplyArenaSize()
         {
