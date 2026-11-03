@@ -28,7 +28,15 @@ jobs:
           healthy=false
           for i in {1..10}; do if curl --fail --silent http://127.0.0.1:5188/health; then healthy=true; break; fi; sleep 1; done
           test "$healthy" = true
-          curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/rewards/daily -H 'Content-Type: application/json' -d '{"playerId":"ci-player"}'
-          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/rewards/daily -H 'Content-Type: application/json' -d '{"playerId":"ci-player"}')
+          player_id=0123456789abcdef0123456789abcdef
+          match_id=fedcba9876543210fedcba9876543210
+          daily_body=$(jq -n --arg player "$player_id" '{playerId:$player}')
+          daily=$(curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/rewards/daily -H 'Content-Type: application/json' -d "$daily_body")
+          echo "$daily" | jq -e '.award == 25 or .award == 50 or .award == 75 or .award == 100'
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/rewards/daily -H 'Content-Type: application/json' -d "$daily_body")
           test "$status" = "409"
-          curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -d '{"playerId":"ci-player","gems":7,"eliminations":2}'
+          match_body=$(jq -n --arg player "$player_id" --arg match "$match_id" '{playerId:$player,matchId:$match,gems:7,eliminations:2}')
+          match=$(curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -d "$match_body")
+          echo "$match" | jq -e '.award == 27 and .profile.matchesPlayed == 1'
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -d "$match_body")
+          test "$status" = "409"
