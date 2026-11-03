@@ -3,10 +3,12 @@ using Microsoft.AspNetCore.RateLimiting;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("rewards", limiter =>
 {
-    limiter.PermitLimit = 10;
+    limiter.PermitLimit = 60;
     limiter.Window = TimeSpan.FromMinutes(1);
     limiter.QueueLimit = 0;
 }));
+builder.Services.Configure<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>(options =>
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests);
 var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "http://localhost:5173,http://localhost:8080")
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
