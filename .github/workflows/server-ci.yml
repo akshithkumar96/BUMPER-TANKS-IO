@@ -24,12 +24,22 @@ jobs:
       - run: dotnet build BumperTanks.Server.csproj --configuration Release
       - name: Start service and verify health and rewards
         run: |
+          set -euo pipefail
+          export Storage__ProfilePath="$RUNNER_TEMP/bumper-profiles.json"
+          export Storage__TelemetryPath="$RUNNER_TEMP/bumper-telemetry.json"
           dotnet run --no-build --configuration Release --urls http://127.0.0.1:5188 &
+          service_pid=$!
+          trap 'kill "$service_pid" 2>/dev/null || true' EXIT
           healthy=false
           for i in {1..10}; do if curl --fail --silent http://127.0.0.1:5188/health; then healthy=true; break; fi; sleep 1; done
           test "$healthy" = true
           player_id=0123456789abcdef0123456789abcdef
           match_id=fedcba9876543210fedcba9876543210
+          invalid_player_body='{"playerId":"not-a-player-id"}'
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/rewards/daily -H 'Content-Type: application/json' -d "$invalid_player_body")
+          test "$status" = "400"
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:5188/v1/profiles/not-a-player-id)
+          test "$status" = "400"
           daily_body=$(jq -n --arg player "$player_id" '{playerId:$player}')
           daily=$(curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/rewards/daily -H 'Content-Type: application/json' -d "$daily_body")
           echo "$daily" | jq -e '.award == 25 or .award == 50 or .award == 75 or .award == 100'
@@ -40,3 +50,22 @@ jobs:
           echo "$match" | jq -e '.award == 27 and .profile.matchesPlayed == 1'
           status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -d "$match_body")
           test "$status" = "409"
+          invalid_match_body=$(jq -n --arg player "$player_id" --arg match "$match_id" '{playerId:$player,matchId:$match,gems:1001,eliminations:0}')
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/matches/complete -H 'Content-Type: application/json' -d "$invalid_match_body")
+          test "$status" = "400"
+          invalid_telemetry_body=$(jq -n --arg player "$player_id" '{playerId:$player,name:"unexpected_event"}')
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/telemetry -H 'Content-Type: application/json' -d "$invalid_telemetry_body")
+          test "$status" = "400"
+          telemetry_body=$(jq -n --arg player "$player_id" '{playerId:$player,name:"match_started"}')
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:5188/v1/telemetry -H 'Content-Type: application/json' -d "$telemetry_body")
+          test "$status" = "202"
+          kill "$service_pid"
+          wait "$service_pid" || true
+          dotnet run --no-build --configuration Release --urls http://127.0.0.1:5188 &
+          service_pid=$!
+          healthy=false
+          for i in {1..10}; do if curl --fail --silent http://127.0.0.1:5188/health; then healthy=true; break; fi; sleep 1; done
+          test "$healthy" = true
+          profile=$(curl --fail --silent --show-error "http://127.0.0.1:5188/v1/profiles/$player_id")
+          echo "$profile" | jq -e '.matchesPlayed == 1'
+          jq -e 'length == 1 and .[0].name == "match_started"' "$Storage__TelemetryPath"
