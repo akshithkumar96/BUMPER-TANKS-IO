@@ -23,12 +23,34 @@ namespace BumperTanks.Gameplay
             }
             if (player == null || player == tank) return;
             var towardPlayer = player.Position - tank.Position;
-            tank.Drive(towardPlayer.normalized, towardPlayer);
+            var movementTarget = FindNearestCollectible(tank.Position, player.Position);
+            tank.Drive((movementTarget - tank.Position).normalized, towardPlayer);
             if (towardPlayer.sqrMagnitude < 100f && Time.time >= nextShot)
             {
                 tank.Fire();
                 nextShot = Time.time + Random.Range(0.5f, 1.2f);
             }
+        }
+
+        private static Vector2 FindNearestCollectible(Vector2 origin, Vector2 fallback)
+        {
+            var target = fallback;
+            var bestDistance = 8f;
+            foreach (var gem in FindObjectsByType<GemPickup>(FindObjectsSortMode.None))
+            {
+                var distance = Vector2.Distance(origin, gem.transform.position);
+                if (distance >= bestDistance) continue;
+                bestDistance = distance;
+                target = gem.transform.position;
+            }
+            foreach (var powerUp in FindObjectsByType<PowerUpPickup>(FindObjectsSortMode.None))
+            {
+                var distance = Vector2.Distance(origin, powerUp.transform.position);
+                if (distance >= bestDistance) continue;
+                bestDistance = distance;
+                target = powerUp.transform.position;
+            }
+            return target;
         }
     }
 }

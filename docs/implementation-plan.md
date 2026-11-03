@@ -34,7 +34,7 @@ Add a 90-120 second state machine: broad arena/power-ups, 5-second tile collapse
 
 Acceptance criteria: match phases transition at their defined times; arena changes are deterministic; a bot can seek targets and power-ups; a match ends with a winner.
 
-Status: the 90-second phase schedule, shared arena bounds, centered 3×3 sudden-death zone, five-second boundary warnings, out-of-bounds pickup cleanup, phase gem multiplier, phase knockback multiplier, and 2.5-second bot fill are implemented. Bot power-up seeking and full match-resolution behavior still need work and Play Mode verification.
+Status: the 90-second phase schedule, shared arena bounds, centered 3×3 sudden-death zone, five-second boundary warnings, out-of-bounds pickup cleanup, phase gem multiplier, phase knockback multiplier, 2.5-second bot fill, and bot pickup seeking are implemented. Full match-resolution behavior and Play Mode verification still need work.
 
 ## Module 4 Multiplayer
 
