@@ -52,7 +52,7 @@ Create menu, matchmaking, HUD, results screen, accessibility controls, cosmetic 
 
 Acceptance criteria: full menu-to-rematch journey works on touch and mouse; cosmetics persist; essential UI is screen-reader and contrast reviewed.
 
-Status: front menu, local arena HUD, result/rematch, color and trail garage cosmetics, server-selected daily spin, battle coins, and leaderboard are implemented. Garage and scores open from the menu and return to it while pausing the arena. Flags, accessible UI review, matchmaking UI, and device-scale UX pass remain.
+Status: front menu, local arena HUD, result/rematch, persistent color and trail garage cosmetics, server-selected daily spin, battle coins, and leaderboard are implemented. Mobile TalkBack/VoiceOver actions cover menu, garage, leaderboard, and tank ability; garage controls use 44-pixel targets, descriptive text, and responsive positioning. Mobile screen-reader access to movement/fire, accessible UI verification on devices, flags, matchmaking UI, and device-scale QA remain.
 
 ## Module 6 Live Operations
 

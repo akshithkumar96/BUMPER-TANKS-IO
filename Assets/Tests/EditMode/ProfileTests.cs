@@ -1,4 +1,5 @@
 using BumperTanks.Frontend;
+using BumperTanks.Gameplay;
 using NUnit.Framework;
 
 namespace BumperTanks.Tests
@@ -26,6 +27,14 @@ namespace BumperTanks.Tests
             var restored = UnityEngine.JsonUtility.FromJson<PlayerProfile>(UnityEngine.JsonUtility.ToJson(profile));
 
             Assert.That(restored.TrailId, Is.EqualTo("neon"));
+        }
+
+        [Test]
+        public void AccessibleFramesConvertImmediateGuiCoordinatesToScreenCoordinates()
+        {
+            var frame = AccessibleUiFrames.ToScreen(new UnityEngine.Rect(12f, 20f, 112f, 44f), 640f);
+
+            Assert.That(frame, Is.EqualTo(new UnityEngine.Rect(12f, 576f, 112f, 44f)));
         }
     }
 }

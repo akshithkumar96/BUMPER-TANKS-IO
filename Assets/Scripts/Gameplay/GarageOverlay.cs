@@ -12,6 +12,8 @@ namespace BumperTanks.Gameplay
         private string dailyRewardMessage = string.Empty;
         private bool dailyRewardPending;
         private const float PanelWidth = 218f;
+        private static readonly string[] ColorOptions = { "sky", "coral", "lime" };
+        private static readonly string[] TrailOptions = { "none", "neon", "gold" };
 
         private void Start()
         {
@@ -24,75 +26,148 @@ namespace BumperTanks.Gameplay
 
         private void Update()
         {
-            if (Input.GetKeyDown(KeyCode.G)) open = !open;
+            if (!Input.GetKeyDown(KeyCode.G)) return;
+            open = !open;
+            if (open) ShowAccessibleScreen();
+            else SendMessage("RefreshCurrentAccessibility", SendMessageOptions.DontRequireReceiver);
         }
 
-        public void OpenGarage() => open = true;
+        public void OpenGarage()
+        {
+            open = true;
+            ShowAccessibleScreen();
+        }
 
         private void OnGUI()
         {
             if (!open) return;
-            var left = Mathf.Max(8f, Screen.width - PanelWidth - 8f);
-            GUI.Box(new Rect(left, 12, PanelWidth, 342), "Garage");
-            GUI.Label(new Rect(left + 10, 40, 196, 20), "Choose tank color");
-            ColorButton("sky", new Color(0.15f, 0.75f, 1f), left, 62);
-            ColorButton("coral", new Color(1f, 0.35f, 0.3f), left, 88);
-            ColorButton("lime", new Color(0.35f, 1f, 0.45f), left, 114);
-            GUI.Label(new Rect(left + 10, 143, 196, 20), "Tank trail");
-            TrailButton("none", left, 164);
-            TrailButton("neon", left, 190);
-            TrailButton("gold", left, 216);
-            GUI.Label(new Rect(left + 10, 245, 196, 20), "Daily spin: 25 / 50 / 75 / 100");
+            var panelWidth = Mathf.Min(PanelWidth, Screen.width - 16f);
+            var left = Mathf.Max(8f, Screen.width - panelWidth - 8f);
+            var top = Mathf.Max(8f, (Screen.height - 308f) * 0.5f);
+            var controlWidth = panelWidth - 20f;
+            GUI.Box(new Rect(left, top, panelWidth, 308), "Garage");
+            GUI.Label(new Rect(left + 10, top + 18, controlWidth, 22), "Tank color");
+            ColorButton(left + 10, top + 40, controlWidth);
+            GUI.Label(new Rect(left + 10, top + 86, controlWidth, 22), "Tank trail");
+            TrailButton(left + 10, top + 108, controlWidth);
+            GUI.Label(new Rect(left + 10, top + 154, controlWidth, 22), "Daily spin: 25, 50, 75, or 100");
             GUI.enabled = !dailyRewardPending;
-            if (GUI.Button(new Rect(left + 10, 266, 198, 26), dailyRewardPending ? "Spinning..." : "Spin daily reward"))
-            {
-                dailyRewardPending = true;
-                dailyRewardMessage = string.Empty;
-                var client = GameServiceClient.Instance;
-                if (client == null)
-                {
-                    dailyRewardPending = false;
-                    dailyRewardMessage = "Service unavailable. Try again later.";
-                }
-                else
-                {
-                    client.ClaimDailyReward(playerId, reward =>
-                    {
-                        profile = ProfileStore.Load();
-                        profile.DailySpinDay = System.DateTime.UtcNow.DayOfYear;
-                        ProfileStore.Save(profile);
-                        dailyRewardPending = false;
-                        dailyRewardMessage = $"Won {reward} Battle Coins!";
-                    }, _ =>
-                    {
-                        dailyRewardPending = false;
-                        dailyRewardMessage = "Unavailable. Try again later.";
-                    });
-                }
-            }
+            if (GUI.Button(new Rect(left + 10, top + 176, controlWidth, 44), dailyRewardPending ? "Spinning..." : "Spin daily reward"))
+                RequestDailyReward();
             GUI.enabled = true;
-            if (!string.IsNullOrEmpty(dailyRewardMessage)) GUI.Label(new Rect(left + 10, 294, 198, 20), dailyRewardMessage);
-            if (GUI.Button(new Rect(left + 10, 318, 198, 24), "Back to main menu"))
-            {
-                open = false;
-                SendMessage("ShowFrontMenu", SendMessageOptions.DontRequireReceiver);
-            }
+            if (!string.IsNullOrEmpty(dailyRewardMessage)) GUI.Label(new Rect(left + 10, top + 222, controlWidth, 24), dailyRewardMessage);
+            if (GUI.Button(new Rect(left + 10, top + 254, controlWidth, 44), "Back to main menu"))
+                ReturnToMenu();
         }
 
         public void CloseGarage() => open = false;
 
-        private void ColorButton(string id, Color color, float left, float y)
+        private void ShowAccessibleScreen()
         {
-            var label = profile.ColorId == id ? $"* {id}" : id;
-            var previous = GUI.color;
-            GUI.color = color;
-            if (GUI.Button(new Rect(left + 10, y, 198, 26), label))
+            if (profile == null) return;
+            var panelWidth = Mathf.Min(PanelWidth, Screen.width - 16f);
+            var left = Mathf.Max(8f, Screen.width - panelWidth - 8f);
+            var top = Mathf.Max(8f, (Screen.height - 308f) * 0.5f);
+            var width = panelWidth - 20f;
+            AccessibleUiBridge.Instance?.ShowScreen("Garage", new AccessibleUiAction[]
             {
-                profile.ColorId = id;
-                ProfileStore.Save(profile);
-                ApplyColor();
+                new($"Tank color, currently {profile.ColorId}", "Activate to cycle to the next color.", new Rect(left + 10, top + 40, width, 44), CycleColor),
+                new($"Tank trail, currently {profile.TrailId}", "Activate to cycle to the next trail.", new Rect(left + 10, top + 108, width, 44), CycleTrail),
+                new(dailyRewardPending ? "Daily reward is spinning" : "Spin daily reward", "Available once each day. The reward is added to your Battle Coins.", new Rect(left + 10, top + 176, width, 44), RequestDailyReward),
+                new("Back to main menu", "Close the garage and return to the main menu.", new Rect(left + 10, top + 254, width, 44), ReturnToMenu)
+            });
+        }
+
+        private void CycleColor()
+        {
+            var index = System.Array.IndexOf(ColorOptions, profile.ColorId);
+            if (index < 0) index = 0;
+            profile.ColorId = ColorOptions[(index + 1) % ColorOptions.Length];
+            ProfileStore.Save(profile);
+            ApplyColor();
+            ShowAccessibleScreen();
+        }
+
+        private void CycleTrail()
+        {
+            var index = System.Array.IndexOf(TrailOptions, profile.TrailId);
+            if (index < 0) index = 0;
+            profile.TrailId = TrailOptions[(index + 1) % TrailOptions.Length];
+            ProfileStore.Save(profile);
+            ApplyTrail();
+            ShowAccessibleScreen();
+        }
+
+        private void RequestDailyReward()
+        {
+            if (dailyRewardPending) return;
+            dailyRewardPending = true;
+            dailyRewardMessage = string.Empty;
+            ShowAccessibleScreen();
+            var client = GameServiceClient.Instance;
+            if (client == null)
+            {
+                dailyRewardPending = false;
+                dailyRewardMessage = "Service unavailable. Try again later.";
+                ShowAccessibleScreen();
+                return;
             }
-            GUI.color = previous;
+
+            client.ClaimDailyReward(playerId, reward =>
+            {
+                profile = ProfileStore.Load();
+                profile.DailySpinDay = System.DateTime.UtcNow.DayOfYear;
+                ProfileStore.Save(profile);
+                dailyRewardPending = false;
+                dailyRewardMessage = $"Won {reward} Battle Coins!";
+                AccessibleUiBridge.Instance?.Announce(dailyRewardMessage);
+                ShowAccessibleScreen();
+            }, _ =>
+            {
+                dailyRewardPending = false;
+                dailyRewardMessage = "Unavailable. Try again later.";
+                AccessibleUiBridge.Instance?.Announce(dailyRewardMessage);
+                ShowAccessibleScreen();
+            });
+        }
+
+        private void ReturnToMenu()
+        {
+            open = false;
+            SendMessage("ShowFrontMenu", SendMessageOptions.DontRequireReceiver);
+        }
+
+        private void ColorButton(float x, float y, float width)
+        {
+            var options = ColorOptions;
+            var index = System.Array.IndexOf(options, profile.ColorId);
+            if (index < 0) index = 0;
+            var color = profile.ColorId switch
+            {
+                "coral" => new Color(1f, 0.35f, 0.3f),
+                "lime" => new Color(0.35f, 1f, 0.45f),
+                _ => new Color(0.15f, 0.75f, 1f)
+            };
+            var oldBackground = GUI.backgroundColor;
+            var oldContent = GUI.contentColor;
+            GUI.backgroundColor = color;
+            GUI.contentColor = Color.black;
+            var label = $"{profile.ColorId}  |  tap to change";
+            if (GUI.Button(new Rect(x, y, width, 44), label))
+            {
+                CycleColor();
+            }
+            GUI.backgroundColor = oldBackground;
+            GUI.contentColor = oldContent;
+        }
+
+        private void TrailButton(float x, float y, float width)
+        {
+            var options = TrailOptions;
+            var index = System.Array.IndexOf(options, profile.TrailId);
+            if (index < 0) index = 0;
+            if (!GUI.Button(new Rect(x, y, width, 44), $"{profile.TrailId} trail  |  tap to change")) return;
+            CycleTrail();
         }
 
         private void ApplyColor()
@@ -107,25 +182,21 @@ namespace BumperTanks.Gameplay
             player.GetComponent<SpriteRenderer>().color = color;
         }
 
-        private void TrailButton(string id, float left, float y)
-        {
-            var label = profile.TrailId == id ? $"* {id}" : id;
-            if (!GUI.Button(new Rect(left + 10, y, 198, 26), label)) return;
-            profile.TrailId = id;
-            ProfileStore.Save(profile);
-            ApplyTrail();
-        }
-
         private void ApplyTrail()
         {
             if (player == null || !player.IsPlayer) return;
             var trail = player.GetComponent<TrailRenderer>();
+            if (trail == null && profile.TrailId == "none") return;
             if (trail == null) trail = player.gameObject.AddComponent<TrailRenderer>();
             trail.time = 0.65f;
             trail.startWidth = 0.34f;
             trail.endWidth = 0.02f;
             trail.numCapVertices = 4;
-            trail.material = new Material(Shader.Find("Sprites/Default"));
+            if (trail.sharedMaterial == null)
+            {
+                var shader = Shader.Find("Sprites/Default");
+                if (shader != null) trail.material = new Material(shader);
+            }
             trail.sortingOrder = -1;
             var color = profile.TrailId switch
             {
@@ -135,6 +206,7 @@ namespace BumperTanks.Gameplay
             };
             trail.startColor = color;
             trail.endColor = new Color(color.r, color.g, color.b, 0f);
+            if (profile.TrailId == "none") trail.Clear();
             trail.emitting = profile.TrailId != "none";
             trail.enabled = profile.TrailId != "none";
         }

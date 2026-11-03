@@ -12,6 +12,9 @@ namespace BumperTanks.Gameplay
         private MatchDirector match;
         private string localPlayerId;
         private bool showFrontMenu = true;
+        private bool matchStarted;
+        private bool resultAccessibilityShown;
+        private AccessibleUiBridge accessibleUi;
 
         private void Awake()
         {
@@ -24,6 +27,7 @@ namespace BumperTanks.Gameplay
             player = CreateTank("Player Speedy Bumper", new Vector2(0f, -3f), TankArchetype.SpeedyBumper, true, new Color(0.15f, 0.75f, 1f));
             gameObject.AddComponent<GarageOverlay>();
             gameObject.AddComponent<LeaderboardOverlay>();
+            accessibleUi = gameObject.AddComponent<AccessibleUiBridge>();
             var heavy = CreateTank("Heavy Dozer Bot", new Vector2(-4f, 3f), TankArchetype.HeavyDozer, false, new Color(1f, 0.55f, 0.15f));
             heavy.gameObject.AddComponent<BotDriver>();
             var spinner = CreateTank("Ricochet Spinner Bot", new Vector2(4f, 3f), TankArchetype.RicochetSpinner, false, new Color(0.9f, 0.25f, 0.8f));
@@ -38,6 +42,14 @@ namespace BumperTanks.Gameplay
                 gem.AddComponent<CircleCollider2D>();
                 gem.AddComponent<GemPickup>();
             }
+            ShowMainMenuAccessibility();
+        }
+
+        private void Update()
+        {
+            if (resultAccessibilityShown || match == null || (match.Winner == null && match.Phase != MatchPhase.Complete)) return;
+            resultAccessibilityShown = true;
+            ShowResultAccessibility();
         }
 
         private System.Collections.IEnumerator TrackArenaStarted()
@@ -53,22 +65,14 @@ namespace BumperTanks.Gameplay
                 GUI.Box(new Rect(Screen.width * 0.5f - 170f, Screen.height * 0.5f - 120f, 340f, 240f), "BUMPER TANKS IO");
                 GUI.Label(new Rect(Screen.width * 0.5f - 140f, Screen.height * 0.5f - 75f, 280f, 25f), "Top down arena brawler");
                 if (GUI.Button(new Rect(Screen.width * 0.5f - 115f, Screen.height * 0.5f - 30f, 230f, 40f), "Play Arena"))
-                {
-                    showFrontMenu = false;
-                    Time.timeScale = 1f;
-                    StartCoroutine(TrackArenaStarted());
-                }
+                    BeginArena();
                 if (GUI.Button(new Rect(Screen.width * 0.5f - 115f, Screen.height * 0.5f + 20f, 110f, 34f), "Garage (G)"))
                 {
-                    showFrontMenu = false;
-                    SendMessage("CloseLeaderboard", SendMessageOptions.DontRequireReceiver);
-                    SendMessage("OpenGarage", SendMessageOptions.DontRequireReceiver);
+                    OpenGarageFromMenu();
                 }
                 if (GUI.Button(new Rect(Screen.width * 0.5f + 5f, Screen.height * 0.5f + 20f, 110f, 34f), "Scores (L)"))
                 {
-                    showFrontMenu = false;
-                    SendMessage("CloseGarage", SendMessageOptions.DontRequireReceiver);
-                    SendMessage("OpenLeaderboard", SendMessageOptions.DontRequireReceiver);
+                    OpenLeaderboardFromMenu();
                 }
                 GUI.Label(new Rect(Screen.width * 0.5f - 140f, Screen.height * 0.5f + 68f, 280f, 24f), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
                 return;
@@ -77,6 +81,9 @@ namespace BumperTanks.Gameplay
             GUI.Label(new Rect(25, 40, 320, 24), "Desktop: WASD/arrows, mouse, click release, E, G garage | Mobile: left drag, right release");
             GUI.Label(new Rect(25, 66, 320, 24), player != null ? $"{player.Archetype}  Health: {player.Health:0}" : "Player eliminated");
             GUI.Label(new Rect(25, 108, 320, 24), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
+            var overlayY = Screen.height - 56f;
+            if (GUI.Button(new Rect(12, overlayY, 112, 44), "Garage")) OpenGarageFromMatch();
+            if (GUI.Button(new Rect(132, overlayY, 112, 44), "Scores")) OpenLeaderboardFromMatch();
             if (player != null)
             {
                 var ability = player.GetComponent<TankAbilityController>();
@@ -100,8 +107,7 @@ namespace BumperTanks.Gameplay
                     if (GUI.Button(new Rect(Screen.width * 0.5f - 80f, Screen.height * 0.5f + 5f, 160f, 36f), "Play Again"))
                     {
                         GameServiceClient.Instance?.Track(localPlayerId, "match_rematch");
-                        Time.timeScale = 1f;
-                        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+                        RestartArena();
                     }
                 }
             }
@@ -111,6 +117,99 @@ namespace BumperTanks.Gameplay
         {
             showFrontMenu = true;
             Time.timeScale = 0f;
+            ShowMainMenuAccessibility();
+        }
+
+        private void BeginArena()
+        {
+            showFrontMenu = false;
+            Time.timeScale = 1f;
+            ShowMatchAccessibility();
+            if (matchStarted) return;
+            matchStarted = true;
+            StartCoroutine(TrackArenaStarted());
+        }
+
+        private void OpenGarageFromMenu()
+        {
+            showFrontMenu = false;
+            SendMessage("CloseLeaderboard", SendMessageOptions.DontRequireReceiver);
+            SendMessage("OpenGarage", SendMessageOptions.DontRequireReceiver);
+        }
+
+        private void OpenLeaderboardFromMenu()
+        {
+            showFrontMenu = false;
+            SendMessage("CloseGarage", SendMessageOptions.DontRequireReceiver);
+            SendMessage("OpenLeaderboard", SendMessageOptions.DontRequireReceiver);
+        }
+
+        private void OpenGarageFromMatch()
+        {
+            Time.timeScale = 0f;
+            SendMessage("CloseLeaderboard", SendMessageOptions.DontRequireReceiver);
+            SendMessage("OpenGarage", SendMessageOptions.DontRequireReceiver);
+        }
+
+        private void OpenLeaderboardFromMatch()
+        {
+            Time.timeScale = 0f;
+            SendMessage("CloseGarage", SendMessageOptions.DontRequireReceiver);
+            SendMessage("OpenLeaderboard", SendMessageOptions.DontRequireReceiver);
+        }
+
+        private void RestartArena()
+        {
+            Time.timeScale = 1f;
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        }
+
+        private void ShowMainMenuAccessibility()
+        {
+            var centerX = Screen.width * 0.5f;
+            var centerY = Screen.height * 0.5f;
+            accessibleUi?.ShowScreen("Bumper Tanks main menu", new AccessibleUiAction[]
+            {
+                new("Play Arena", "Start the local arena match.", new Rect(centerX - 115f, centerY - 30f, 230f, 40f), BeginArena),
+                new("Garage", "Change tank color or trail and claim the daily reward.", new Rect(centerX - 115f, centerY + 20f, 110f, 34f), OpenGarageFromMenu),
+                new("Leaderboard", "View Battle Coins rankings.", new Rect(centerX + 5f, centerY + 20f, 110f, 34f), OpenLeaderboardFromMenu)
+            });
+        }
+
+        public void RefreshCurrentAccessibility()
+        {
+            if (showFrontMenu) ShowMainMenuAccessibility();
+            else ShowMatchAccessibility();
+        }
+
+        private void ShowMatchAccessibility()
+        {
+            var y = Screen.height - 56f;
+            var actions = new System.Collections.Generic.List<AccessibleUiAction>
+            {
+                new("Open Garage", "Pause the match and change cosmetics or claim the daily reward.", new Rect(12f, y, 112f, 44f), OpenGarageFromMatch),
+                new("Open Scores", "Pause the match and view Battle Coins rankings.", new Rect(132f, y, 112f, 44f), OpenLeaderboardFromMatch)
+            };
+            if (player != null && player.gameObject.activeInHierarchy)
+            {
+                var ability = player.GetComponent<TankAbilityController>();
+                if (ability != null)
+                {
+                    var frame = new Rect(Mathf.Max(12f, Screen.width - 148f), Screen.height - 72f, 136f, 60f);
+                    actions.Add(new AccessibleUiAction("Activate tank ability", "Use the archetype ability. It may be on cooldown.", frame, () => ability.Activate()));
+                }
+            }
+            accessibleUi?.ShowScreen("Match controls. Drag the left side to steer; drag and release the right side to aim and fire.", actions.ToArray());
+        }
+
+        private void ShowResultAccessibility()
+        {
+            var label = match.Winner != null ? $"Winner: {match.Winner.name}" : "Match complete";
+            var frame = new Rect(Screen.width * 0.5f - 80f, Screen.height * 0.5f + 5f, 160f, 36f);
+            accessibleUi?.ShowScreen(label, new AccessibleUiAction[]
+            {
+                new("Play Again", "Start a fresh arena match.", frame, RestartArena)
+            });
         }
 
         private static void CreateCamera()
