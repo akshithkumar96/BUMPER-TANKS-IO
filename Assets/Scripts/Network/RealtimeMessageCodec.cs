@@ -6,7 +6,7 @@ namespace BumperTanks.Network
     /// <summary>Wire-format codec shared by transports and protocol tests.</summary>
     public static class RealtimeMessageCodec
     {
-        public static string EncodeJoin(string stablePlayerId, string displayName)
+        public static string EncodeJoin(string stablePlayerId, string displayName, string archetype = "SpeedyBumper")
         {
             if (string.IsNullOrEmpty(stablePlayerId) || stablePlayerId.Length != 32)
                 throw new ArgumentException("Player ID must contain 32 characters.", nameof(stablePlayerId));
@@ -14,9 +14,17 @@ namespace BumperTanks.Network
             {
                 type = "join",
                 playerId = stablePlayerId,
-                displayName = displayName ?? string.Empty
+                displayName = displayName ?? string.Empty,
+                archetype = NormalizeArchetype(archetype)
             });
         }
+
+        public static string NormalizeArchetype(string archetype) => archetype switch
+        {
+            "HeavyDozer" => "HeavyDozer",
+            "RicochetSpinner" => "RicochetSpinner",
+            _ => "SpeedyBumper"
+        };
 
         public static string EncodeInput(PlayerInputFrame input) => JsonUtility.ToJson(new RealtimeInputMessage
         {
@@ -49,7 +57,17 @@ namespace BumperTanks.Network
             tick = -1;
             snapshots = Array.Empty<TankSnapshot>();
             var data = JsonUtility.FromJson<RealtimeSnapshotMessage>(json);
-            if (data == null || data.type != "snapshot" || data.tick < 0 || data.players == null) return false;
+            if (data == null || data.type != "snapshot" || data.tick < 0 || data.players == null ||
+                !Finite(data.elapsedSeconds) || !Finite(data.remainingSeconds)) return false;
+            var arenaSize = Vector2.zero;
+            var hasArenaBounds = json.IndexOf("\"arenaBounds\"", StringComparison.Ordinal) >= 0;
+            if (hasArenaBounds && data.arenaBounds != null)
+            {
+                if (!Finite(data.arenaBounds.halfWidth) || !Finite(data.arenaBounds.halfHeight) ||
+                    data.arenaBounds.halfWidth <= 0f || data.arenaBounds.halfHeight <= 0f) return false;
+                arenaSize = new Vector2(data.arenaBounds.halfWidth * 2f, data.arenaBounds.halfHeight * 2f);
+            }
+            var hasAliveState = json.IndexOf("\"alive\"", StringComparison.Ordinal) >= 0;
             var parsed = new TankSnapshot[data.players.Length];
             for (var index = 0; index < data.players.Length; index++)
             {
@@ -59,7 +77,10 @@ namespace BumperTanks.Network
                     !Finite(player.velocity.x) || !Finite(player.velocity.y) || !Finite(player.health)) return false;
                 parsed[index] = new TankSnapshot(data.tick, player.playerId,
                     new Vector2(player.position.x, player.position.y),
-                    new Vector2(player.velocity.x, player.velocity.y), player.health);
+                    new Vector2(player.velocity.x, player.velocity.y), player.health,
+                    hasAliveState ? player.alive : player.health > 0f, player.eliminations,
+                    data.phase, data.elapsedSeconds, data.remainingSeconds, data.winnerPlayerId,
+                    arenaSize, player.shielded, NormalizeArchetype(player.archetype), player.whirling);
             }
             tick = data.tick;
             snapshots = parsed;

@@ -17,6 +17,7 @@ namespace BumperTanks.Network.Tests
             Assert.That(decoded.type, Is.EqualTo("join"));
             Assert.That(decoded.playerId, Is.EqualTo(playerId));
             Assert.That(decoded.displayName, Is.EqualTo(name));
+            Assert.That(decoded.archetype, Is.EqualTo("SpeedyBumper"));
         }
 
         [Test]
@@ -31,6 +32,18 @@ namespace BumperTanks.Network.Tests
             Assert.That(decoded.aim.x, Is.EqualTo(1f));
             Assert.That(decoded.fire, Is.True);
             Assert.That(decoded.ability, Is.False);
+        }
+
+        [Test]
+        public void JoinMessageCarriesCanonicalTankArchetype()
+        {
+            const string playerId = "0123456789abcdef0123456789abcdef";
+
+            var json = RealtimeMessageCodec.EncodeJoin(playerId, "Tank", "RicochetSpinner");
+            var decoded = JsonUtility.FromJson<JoinShape>(json);
+
+            Assert.That(decoded.archetype, Is.EqualTo("RicochetSpinner"));
+            Assert.That(RealtimeMessageCodec.NormalizeArchetype("unknown"), Is.EqualTo("SpeedyBumper"));
         }
 
         [Test]
@@ -49,7 +62,7 @@ namespace BumperTanks.Network.Tests
         [Test]
         public void SnapshotMessageParsesEveryPlayerState()
         {
-            const string json = "{\"type\":\"snapshot\",\"tick\":42,\"players\":[{\"playerId\":1,\"position\":{\"x\":1.5,\"y\":-2},\"velocity\":{\"x\":3,\"y\":4},\"health\":75},{\"playerId\":-1,\"position\":{\"x\":-1,\"y\":2},\"velocity\":{\"x\":0,\"y\":-1},\"health\":100}]}";
+            const string json = "{\"type\":\"snapshot\",\"tick\":42,\"phase\":\"collapse\",\"elapsedSeconds\":35,\"remainingSeconds\":55,\"winnerPlayerId\":0,\"arenaBounds\":{\"halfWidth\":5,\"halfHeight\":4},\"players\":[{\"playerId\":1,\"position\":{\"x\":1.5,\"y\":-2},\"velocity\":{\"x\":3,\"y\":4},\"health\":75,\"alive\":true,\"eliminations\":2,\"shielded\":true,\"whirling\":true,\"archetype\":\"RicochetSpinner\"},{\"playerId\":-1,\"position\":{\"x\":-1,\"y\":2},\"velocity\":{\"x\":0,\"y\":-1},\"health\":0,\"alive\":false,\"eliminations\":0}]}";
 
             Assert.That(RealtimeMessageCodec.TryReadSnapshots(json, out var tick, out var snapshots), Is.True);
             Assert.That(tick, Is.EqualTo(42));
@@ -57,7 +70,18 @@ namespace BumperTanks.Network.Tests
             Assert.That(snapshots[0].Position, Is.EqualTo(new Vector2(1.5f, -2f)));
             Assert.That(snapshots[0].Velocity, Is.EqualTo(new Vector2(3f, 4f)));
             Assert.That(snapshots[0].Health, Is.EqualTo(75f));
+            Assert.That(snapshots[0].Alive, Is.True);
+            Assert.That(snapshots[0].Eliminations, Is.EqualTo(2));
+            Assert.That(snapshots[0].Phase, Is.EqualTo("collapse"));
+            Assert.That(snapshots[0].ElapsedSeconds, Is.EqualTo(35f));
+            Assert.That(snapshots[0].RemainingSeconds, Is.EqualTo(55f));
+            Assert.That(snapshots[0].WinnerPlayerId, Is.Zero);
+            Assert.That(snapshots[0].ArenaSize, Is.EqualTo(new Vector2(10f, 8f)));
+            Assert.That(snapshots[0].Shielded, Is.True);
+            Assert.That(snapshots[0].Archetype, Is.EqualTo("RicochetSpinner"));
+            Assert.That(snapshots[0].Whirling, Is.True);
             Assert.That(snapshots[1].PlayerId, Is.EqualTo(-1));
+            Assert.That(snapshots[1].Alive, Is.False);
         }
 
         [Test]
@@ -70,6 +94,17 @@ namespace BumperTanks.Network.Tests
         }
 
         [Test]
+        public void SnapshotWithoutOptionalMatchMetadataRemainsCompatible()
+        {
+            const string json = "{\"type\":\"snapshot\",\"tick\":2,\"players\":[{\"playerId\":4,\"position\":{\"x\":0,\"y\":0},\"velocity\":{\"x\":0,\"y\":0},\"health\":100}]}";
+
+            Assert.That(RealtimeMessageCodec.TryReadSnapshots(json, out _, out var snapshots), Is.True);
+            Assert.That(snapshots[0].Alive, Is.True);
+            Assert.That(snapshots[0].Phase, Is.Empty);
+            Assert.That(snapshots[0].ArenaSize, Is.EqualTo(Vector2.zero));
+        }
+
+        [Test]
         public void ServerErrorCodeIsExposedWhenNoHumanReadableMessageExists()
         {
             Assert.That(RealtimeMessageCodec.ReadError("{\"type\":\"error\",\"code\":\"player_already_connected\"}"),
@@ -77,7 +112,7 @@ namespace BumperTanks.Network.Tests
         }
 
         [System.Serializable]
-        private sealed class JoinShape { public string type; public string playerId; public string displayName; }
+        private sealed class JoinShape { public string type; public string playerId; public string displayName; public string archetype; }
 
         [System.Serializable]
         private sealed class InputShape

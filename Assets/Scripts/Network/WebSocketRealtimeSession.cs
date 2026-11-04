@@ -48,6 +48,7 @@ namespace BumperTanks.Network
         private Uri endpoint;
         private string playerId;
         private string displayName;
+        private string archetype = "SpeedyBumper";
         private int webGlId;
         private bool explicitDisconnect;
         private bool reconnectScheduled;
@@ -65,7 +66,7 @@ namespace BumperTanks.Network
         private readonly SemaphoreSlim sendLock = new(1, 1);
 #endif
 
-        public void Connect(string url, string stablePlayerId, string name)
+        public void Connect(string url, string stablePlayerId, string name, string tankArchetype = "SpeedyBumper")
         {
             if (!Uri.TryCreate(url, UriKind.Absolute, out endpoint) ||
                 (endpoint.Scheme != "ws" && endpoint.Scheme != "wss"))
@@ -81,6 +82,7 @@ namespace BumperTanks.Network
 
             playerId = stablePlayerId;
             displayName = NormalizeDisplayName(name);
+            archetype = RealtimeMessageCodec.NormalizeArchetype(tankArchetype);
             explicitDisconnect = false;
             ConnectTransport();
         }
@@ -184,7 +186,7 @@ namespace BumperTanks.Network
         }
 #endif
 
-        private string BuildJoinFrame() => RealtimeMessageCodec.EncodeJoin(playerId, displayName) + "\n";
+        private string BuildJoinFrame() => RealtimeMessageCodec.EncodeJoin(playerId, displayName, archetype) + "\n";
 
         private void SendFrame(string frame)
         {
@@ -438,9 +440,9 @@ namespace BumperTanks.Network
         public RealtimePlayerInfo[] Players { get; }
     }
 
-    [Serializable] public sealed class RealtimePlayerInfo { public int playerId; public string displayName; }
+    [Serializable] public sealed class RealtimePlayerInfo { public int playerId; public string displayName; public string archetype; public bool isBot; }
     [Serializable] internal sealed class RealtimeMessageHeader { public string type; }
-    [Serializable] internal sealed class RealtimeJoinMessage { public string type; public string playerId; public string displayName; }
+    [Serializable] internal sealed class RealtimeJoinMessage { public string type; public string playerId; public string displayName; public string archetype; }
     [Serializable] internal sealed class RealtimeInputMessage
     {
         public string type;
@@ -462,14 +464,25 @@ namespace BumperTanks.Network
     {
         public string type;
         public int tick;
+        public string phase;
+        public float elapsedSeconds;
+        public float remainingSeconds;
+        public int winnerPlayerId;
+        public RealtimeArenaBounds arenaBounds;
         public RealtimeSnapshotPlayer[] players;
     }
+    [Serializable] internal sealed class RealtimeArenaBounds { public float halfWidth; public float halfHeight; }
     [Serializable] internal sealed class RealtimeSnapshotPlayer
     {
         public int playerId;
         public RealtimeVector position;
         public RealtimeVector velocity;
         public float health;
+        public bool alive;
+        public int eliminations;
+        public bool shielded;
+        public bool whirling;
+        public string archetype;
     }
     [Serializable] internal sealed class RealtimeErrorMessage { public string type; public string message; public string code; }
     [Serializable] internal sealed class RealtimeVector { public float x; public float y; }

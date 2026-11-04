@@ -23,13 +23,26 @@ namespace BumperTanks.Network
 
     public readonly struct TankSnapshot
     {
-        public TankSnapshot(int tick, int playerId, Vector2 position, Vector2 velocity, float health)
+        public TankSnapshot(int tick, int playerId, Vector2 position, Vector2 velocity, float health,
+            bool alive = true, int eliminations = 0, string phase = null, float elapsedSeconds = 0f,
+            float remainingSeconds = 0f, int winnerPlayerId = 0, Vector2 arenaSize = default, bool shielded = false,
+            string archetype = "SpeedyBumper", bool whirling = false)
         {
             Tick = tick;
             PlayerId = playerId;
             Position = position;
             Velocity = velocity;
             Health = health;
+            Alive = alive;
+            Eliminations = eliminations;
+            Phase = phase ?? string.Empty;
+            ElapsedSeconds = elapsedSeconds;
+            RemainingSeconds = remainingSeconds;
+            WinnerPlayerId = winnerPlayerId;
+            ArenaSize = arenaSize;
+            Shielded = shielded;
+            Archetype = archetype ?? "SpeedyBumper";
+            Whirling = whirling;
         }
 
         public int Tick { get; }
@@ -37,6 +50,17 @@ namespace BumperTanks.Network
         public Vector2 Position { get; }
         public Vector2 Velocity { get; }
         public float Health { get; }
+        public bool Alive { get; }
+        public int Eliminations { get; }
+        public string Phase { get; }
+        public float ElapsedSeconds { get; }
+        public float RemainingSeconds { get; }
+        /// <summary>Zero means the server has not selected a winner yet.</summary>
+        public int WinnerPlayerId { get; }
+        public Vector2 ArenaSize { get; }
+        public bool Shielded { get; }
+        public string Archetype { get; }
+        public bool Whirling { get; }
     }
 
     public interface IRealtimeSession : IDisposable

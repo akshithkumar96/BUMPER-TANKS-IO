@@ -15,9 +15,11 @@ namespace BumperTanks.Gameplay
         private readonly ScoreService scores = new();
         private bool filledBots;
         private bool resultSubmitted;
+        private bool networkAuthoritative;
+        private float authoritativeElapsed;
         private TankController2D winner;
 
-        public float Elapsed => Time.time - startedAt;
+        public float Elapsed => networkAuthoritative ? authoritativeElapsed : Time.time - startedAt;
         public string MatchId { get; private set; }
         public MatchPhase Phase => phase;
         public int CollapseSteps => collapseSteps;
@@ -49,6 +51,18 @@ namespace BumperTanks.Gameplay
         public void AwardElimination(TankController2D tank)
         {
             if (tank != null) Scores.AwardElimination(tank.GetInstanceID());
+        }
+
+        public void ApplyRealtimeState(float elapsedSeconds, Vector2 authoritativeArenaSize)
+        {
+            networkAuthoritative = true;
+            authoritativeElapsed = Mathf.Max(0f, elapsedSeconds);
+            phase = MatchRules.PhaseAt(authoritativeElapsed);
+            collapseSteps = MatchRules.CollapseStepsAt(authoritativeElapsed);
+            Bounds = authoritativeArenaSize.x > 0f && authoritativeArenaSize.y > 0f
+                ? new ArenaBounds(Vector2.zero, authoritativeArenaSize)
+                : MatchRules.BoundsAt(authoritativeElapsed);
+            ApplyArenaSize();
         }
 
         public void SchedulePowerUpRespawn(PowerUpType type, float delaySeconds = 12f)

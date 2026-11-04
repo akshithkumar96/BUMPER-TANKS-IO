@@ -57,6 +57,7 @@ namespace BumperTanks.Gameplay
                 default:
                     return false;
             }
+            tank.MarkNetworkAbilityActivated();
             return true;
         }
 

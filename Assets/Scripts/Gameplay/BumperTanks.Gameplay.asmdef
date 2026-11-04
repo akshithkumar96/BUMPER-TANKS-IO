@@ -1,7 +1,7 @@
 {
   "name": "BumperTanks.Gameplay",
   "rootNamespace": "BumperTanks.Gameplay",
-  "references": ["BumperTanks.Core", "BumperTanks.Combat", "BumperTanks.Match", "BumperTanks.Frontend"],
+  "references": ["BumperTanks.Core", "BumperTanks.Combat", "BumperTanks.Match", "BumperTanks.Frontend", "BumperTanks.Network"],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

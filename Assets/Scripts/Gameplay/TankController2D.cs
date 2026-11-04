@@ -1,6 +1,7 @@
 using BumperTanks.Combat;
 using BumperTanks.Core;
 using BumperTanks.Match;
+using BumperTanks.Network;
 using UnityEngine;
 
 namespace BumperTanks.Gameplay
@@ -32,10 +33,13 @@ namespace BumperTanks.Gameplay
         private float megaBulletUntil;
         private float magnetUntil;
         private float dashUntil;
+        private bool pendingNetworkFire;
+        private bool pendingNetworkAbility;
 
         public bool IsPlayer => playerControlled;
         public Vector2 Position => body.position;
         public Vector2 Aim => aim;
+        public Vector2 Steering => steering;
         public float Health => health;
         public TankArchetype Archetype => archetype;
         public bool HasMagnet => Time.time < magnetUntil;
@@ -76,6 +80,12 @@ namespace BumperTanks.Gameplay
         private void Update()
         {
             if (!playerControlled || Camera.main == null) return;
+            if (Time.timeScale <= 0f)
+            {
+                steering = Vector2.zero;
+                if (aimTrajectory != null) aimTrajectory.enabled = false;
+                return;
+            }
             if (Input.touchCount > 0)
             {
                 ReadTouchInputs();
@@ -174,6 +184,7 @@ namespace BumperTanks.Gameplay
             var velocity = body.linearVelocity;
             var impulseMultiplier = Time.time < megaBulletUntil ? 1.8f : 1f;
             if (!weapon.TryFire(Time.time, body.position, aim, tuning.Mass(baseMass), ref velocity, out var shot, impulseMultiplier)) return false;
+            if (playerControlled) pendingNetworkFire = true;
             body.linearVelocity = velocity;
             var projectile = new GameObject("Projectile");
             projectile.transform.position = shot.Origin + (shot.Direction * 0.7f);
@@ -188,6 +199,30 @@ namespace BumperTanks.Gameplay
             projectile.AddComponent<Projectile2D>().Launch(this, shot.Direction,
                 projectileSpeed * tuning.ProjectileSpeedMultiplier, shot.Impulse, 2.5f, tuning.ProjectileBounces);
             return true;
+        }
+
+        public PlayerInputFrame ConsumeNetworkInput(int tick, bool allowGameplayInput = true)
+        {
+            var input = new PlayerInputFrame(tick, allowGameplayInput ? steering : Vector2.zero, aim,
+                allowGameplayInput && pendingNetworkFire, allowGameplayInput && pendingNetworkAbility);
+            pendingNetworkFire = false;
+            pendingNetworkAbility = false;
+            return input;
+        }
+
+        public void MarkNetworkAbilityActivated()
+        {
+            if (playerControlled) pendingNetworkAbility = true;
+        }
+
+        public void ReconcileNetworkState(TankSnapshot snapshot, float correction)
+        {
+            if (body == null) return;
+            body.position = TankPrediction.ReconcilePosition(body.position, snapshot.Position, correction);
+            body.linearVelocity = snapshot.Velocity;
+            health = snapshot.Alive ? Mathf.Clamp(snapshot.Health, 0f, 100f) : 0f;
+            if (health <= 0f) gameObject.SetActive(false);
+            else if (!gameObject.activeSelf) gameObject.SetActive(true);
         }
 
         public ProjectileHitResult ApplyProjectileImpact(Projectile2D projectile, TankController2D attacker, Vector2 impactDirection, float impulse)
