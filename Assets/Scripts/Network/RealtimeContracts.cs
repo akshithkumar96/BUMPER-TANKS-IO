@@ -1,4 +1,5 @@
 using System;
+using BumperTanks.Match;
 using UnityEngine;
 
 namespace BumperTanks.Network
@@ -26,7 +27,8 @@ namespace BumperTanks.Network
         public TankSnapshot(int tick, int playerId, Vector2 position, Vector2 velocity, float health,
             bool alive = true, int eliminations = 0, string phase = null, float elapsedSeconds = 0f,
             float remainingSeconds = 0f, int winnerPlayerId = 0, Vector2 arenaSize = default, bool shielded = false,
-            string archetype = "SpeedyBumper", bool whirling = false)
+            string archetype = "SpeedyBumper", bool whirling = false, int gems = 0,
+            bool nitroActive = false, bool megaBulletActive = false, bool magnetActive = false)
         {
             Tick = tick;
             PlayerId = playerId;
@@ -43,6 +45,10 @@ namespace BumperTanks.Network
             Shielded = shielded;
             Archetype = archetype ?? "SpeedyBumper";
             Whirling = whirling;
+            Gems = gems;
+            NitroActive = nitroActive;
+            MegaBulletActive = megaBulletActive;
+            MagnetActive = magnetActive;
         }
 
         public int Tick { get; }
@@ -61,6 +67,52 @@ namespace BumperTanks.Network
         public bool Shielded { get; }
         public string Archetype { get; }
         public bool Whirling { get; }
+        public int Gems { get; }
+        public bool NitroActive { get; }
+        public bool MegaBulletActive { get; }
+        public bool MagnetActive { get; }
+    }
+
+    public readonly struct GemPickupSnapshot
+    {
+        public GemPickupSnapshot(int pickupId, Vector2 position, int value)
+        {
+            PickupId = pickupId;
+            Position = position;
+            Value = value;
+        }
+
+        public int PickupId { get; }
+        public Vector2 Position { get; }
+        public int Value { get; }
+    }
+
+    public readonly struct PowerUpPickupSnapshot
+    {
+        public PowerUpPickupSnapshot(int pickupId, PowerUpType type, Vector2 position)
+        {
+            PickupId = pickupId;
+            Type = type;
+            Position = position;
+        }
+
+        public int PickupId { get; }
+        public PowerUpType Type { get; }
+        public Vector2 Position { get; }
+    }
+
+    public readonly struct RealtimePickupFrame
+    {
+        public RealtimePickupFrame(int tick, GemPickupSnapshot[] gems, PowerUpPickupSnapshot[] powerUps)
+        {
+            Tick = tick;
+            Gems = gems ?? Array.Empty<GemPickupSnapshot>();
+            PowerUps = powerUps ?? Array.Empty<PowerUpPickupSnapshot>();
+        }
+
+        public int Tick { get; }
+        public GemPickupSnapshot[] Gems { get; }
+        public PowerUpPickupSnapshot[] PowerUps { get; }
     }
 
     public interface IRealtimeSession : IDisposable

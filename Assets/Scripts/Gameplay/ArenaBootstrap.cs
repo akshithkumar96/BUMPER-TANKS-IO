@@ -19,6 +19,8 @@ namespace BumperTanks.Gameplay
         private MatchDirector match;
         private WebSocketRealtimeSession realtime;
         private readonly Dictionary<int, RemoteTankVisual> remoteTanks = new();
+        private readonly Dictionary<int, Transform> onlineGemVisuals = new();
+        private readonly Dictionary<int, Transform> onlinePowerUpVisuals = new();
         private readonly Dictionary<int, TankArchetype> onlineArchetypes = new();
         private readonly Dictionary<int, string> onlinePlayerNames = new();
         private readonly HashSet<int> aliveOnlinePlayers = new();
@@ -31,6 +33,8 @@ namespace BumperTanks.Gameplay
         private int onlinePlayerCount;
         private int onlineWinnerPlayerId;
         private int onlineEliminations;
+        private int onlineGemCount;
+        private int appliedPickupTick = -1;
         private float onlineRemainingSeconds;
         private string onlinePhase = string.Empty;
         private bool onlineMatch;
@@ -57,6 +61,7 @@ namespace BumperTanks.Gameplay
             realtime = gameObject.AddComponent<WebSocketRealtimeSession>();
             realtime.RoomJoined += OnRealtimeRoomJoined;
             realtime.SnapshotReceived += OnRealtimeSnapshot;
+            realtime.PickupFrameReceived += OnRealtimePickupFrame;
             realtime.Error += OnRealtimeError;
             realtime.Disconnected += OnRealtimeDisconnected;
             var heavy = CreateTank("Heavy Dozer Bot", new Vector2(-4f, 3f), TankArchetype.HeavyDozer, false, new Color(1f, 0.55f, 0.15f));
@@ -144,7 +149,7 @@ namespace BumperTanks.Gameplay
             {
                 var gems = player != null && !onlineMatch ? match.GemsFor(player) : 0;
                 var eliminations = onlineMatch ? onlineEliminations : player != null ? match.Scores.EliminationsFor(player.GetInstanceID()) : 0;
-                GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 157f, 320, 24), safe), onlineMatch ? $"Online KOs: {eliminations}" : $"Gems: {gems}  KOs: {eliminations}");
+                GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 157f, 360, 24), safe), onlineMatch ? $"Online Gems: {onlineGemCount}  KOs: {eliminations}" : $"Gems: {gems}  KOs: {eliminations}");
                 GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 178f, 320, 24), safe), RealtimeStatusText());
                 if (onlineMatch ? onlinePhase == "finished" : match.Winner != null || match.Phase == BumperTanks.Match.MatchPhase.Complete)
                 {
@@ -285,6 +290,10 @@ namespace BumperTanks.Gameplay
             inputTick = -1;
             inputSendAccumulator = 0f;
             appliedArenaTick = -1;
+            appliedPickupTick = -1;
+            onlineGemCount = 0;
+            ClearPickupVisuals(onlineGemVisuals);
+            ClearPickupVisuals(onlinePowerUpVisuals);
             onlinePlayerCount = room.Players != null ? room.Players.Length : 0;
             realtimeStatus = $"Queued · {onlinePlayerCount}/8 players";
             foreach (var view in remoteTanks.Values) Destroy(view.Transform.gameObject);
@@ -334,6 +343,8 @@ namespace BumperTanks.Gameplay
             if (snapshot.PlayerId == onlinePlayerId)
             {
                 onlineEliminations = snapshot.Eliminations;
+                onlineGemCount = snapshot.Gems;
+                player?.SyncRealtimePowerUpState(snapshot.NitroActive, snapshot.MegaBulletActive, snapshot.MagnetActive);
                 player?.ReconcileNetworkState(snapshot, 0.2f);
                 return;
             }
@@ -357,6 +368,76 @@ namespace BumperTanks.Gameplay
             view.Health = snapshot.Alive ? snapshot.Health : 0f;
             view.Shielded = snapshot.Shielded;
             view.Whirling = snapshot.Whirling;
+            view.NitroActive = snapshot.NitroActive;
+            view.MegaBulletActive = snapshot.MegaBulletActive;
+            view.MagnetActive = snapshot.MagnetActive;
+        }
+
+        private void OnRealtimePickupFrame(RealtimePickupFrame frame)
+        {
+            if (!onlineMatch || frame.Tick < appliedPickupTick) return;
+            appliedPickupTick = frame.Tick;
+            ReconcilePickupVisuals(onlineGemVisuals, frame.Gems, item => item.PickupId, item => item.Position,
+                item => CreatePickupVisual($"Online Gem {item.PickupId}", item.Position,
+                    item.Value > 1 ? new Color(1f, 0.78f, 0.2f) : new Color(0.2f, 0.95f, 1f), item.Value > 1 ? 0.42f : 0.34f));
+            ReconcilePickupVisuals(onlinePowerUpVisuals, frame.PowerUps, item => item.PickupId, item => item.Position,
+                item => CreatePickupVisual($"Online {item.Type} {item.PickupId}", item.Position, PowerUpColor(item.Type), 0.42f));
+        }
+
+        private void ReconcilePickupVisuals<T>(Dictionary<int, Transform> visuals, T[] items, Func<T, int> idSelector,
+            Func<T, Vector2> positionSelector, Func<T, Transform> create)
+        {
+            var available = new HashSet<int>();
+            foreach (var item in items)
+            {
+                var id = idSelector(item);
+                available.Add(id);
+                if (!visuals.TryGetValue(id, out var visual) || visual == null)
+                {
+                    visual = create(item);
+                    visuals[id] = visual;
+                }
+                visual.position = positionSelector(item);
+            }
+            List<int> removed = null;
+            foreach (var item in visuals)
+            {
+                if (available.Contains(item.Key)) continue;
+                removed ??= new List<int>();
+                removed.Add(item.Key);
+            }
+            if (removed == null) return;
+            foreach (var id in removed)
+            {
+                if (visuals[id] != null) Destroy(visuals[id].gameObject);
+                visuals.Remove(id);
+            }
+        }
+
+        private static Transform CreatePickupVisual(string name, Vector2 position, Color color, float size)
+        {
+            var pickup = new GameObject(name);
+            pickup.transform.position = position;
+            pickup.transform.localScale = Vector3.one * size;
+            var sprite = pickup.AddComponent<SpriteRenderer>();
+            sprite.sprite = RuntimeSprite.White;
+            sprite.color = color;
+            sprite.sortingOrder = 2;
+            return pickup.transform;
+        }
+
+        private static Color PowerUpColor(PowerUpType type) => type switch
+        {
+            PowerUpType.Nitro => new Color(1f, 0.9f, 0.1f),
+            PowerUpType.MegaBullet => new Color(1f, 0.25f, 0.25f),
+            _ => new Color(0.3f, 1f, 0.45f)
+        };
+
+        private void ClearPickupVisuals(Dictionary<int, Transform> visuals)
+        {
+            foreach (var item in visuals.Values)
+                if (item != null) Destroy(item.gameObject);
+            visuals.Clear();
         }
 
         private RemoteTankVisual CreateRemoteTank(int playerId)
@@ -399,7 +480,7 @@ namespace BumperTanks.Gameplay
                 var alpha = Mathf.Clamp01((Time.unscaledTime - view.ReceivedAt) * MatchmakingPolicy.SimulationTicksPerSecond);
                 var position = view.Interpolator.Position(alpha);
                 view.Transform.position = position;
-                view.Sprite.color = view.Shielded ? Color.cyan : view.Whirling ? Color.magenta : view.BaseColor;
+                view.Sprite.color = view.Shielded ? Color.cyan : view.Whirling ? Color.magenta : view.NitroActive ? Color.yellow : view.MegaBulletActive ? new Color(1f, 0.25f, 0.25f) : view.MagnetActive ? new Color(0.3f, 1f, 0.45f) : view.BaseColor;
                 var velocity = view.Interpolator.Velocity(alpha);
                 if (velocity.sqrMagnitude > 0.01f) view.Transform.up = velocity.normalized;
                 if (view.Transform.gameObject.activeSelf != (view.Health > 0f))
@@ -463,6 +544,9 @@ namespace BumperTanks.Gameplay
             public float Health { get; set; } = 100f;
             public bool Shielded { get; set; }
             public bool Whirling { get; set; }
+            public bool NitroActive { get; set; }
+            public bool MegaBulletActive { get; set; }
+            public bool MagnetActive { get; set; }
         }
 
         private void ShowResultAccessibility()

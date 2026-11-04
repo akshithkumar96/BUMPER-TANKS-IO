@@ -35,6 +35,9 @@ namespace BumperTanks.Gameplay
         private float dashUntil;
         private bool pendingNetworkFire;
         private bool pendingNetworkAbility;
+        private bool realtimeNitroActive;
+        private bool realtimeMegaBulletActive;
+        private bool realtimeMagnetActive;
 
         public bool IsPlayer => playerControlled;
         public Vector2 Position => body.position;
@@ -42,7 +45,10 @@ namespace BumperTanks.Gameplay
         public Vector2 Steering => steering;
         public float Health => health;
         public TankArchetype Archetype => archetype;
-        public bool HasMagnet => Time.time < magnetUntil;
+        public bool HasMagnet => realtimeMagnetActive || Time.time < magnetUntil;
+        public bool NitroActive => realtimeNitroActive || Time.time < nitroUntil;
+        public bool MegaBulletActive => realtimeMegaBulletActive || Time.time < megaBulletUntil;
+        public bool RealtimeMagnetActive => realtimeMagnetActive;
         public bool IsDashing => Time.time < dashUntil;
         public float BumpKnockbackMultiplier => IsDashing ? 2.5f : 1f;
 
@@ -161,7 +167,7 @@ namespace BumperTanks.Gameplay
 
         private void FixedUpdate()
         {
-            var speedMultiplier = Time.time < nitroUntil ? 1.5f : 1f;
+            var speedMultiplier = NitroActive ? 1.5f : 1f;
             body.linearVelocity = TankMotion.Step(body.linearVelocity, steering, acceleration, tuning.MaxSpeed(baseSpeed) * speedMultiplier, drag, Time.fixedDeltaTime);
             if (body.linearVelocity.sqrMagnitude > 0.01f && !playerControlled)
             {
@@ -182,7 +188,7 @@ namespace BumperTanks.Gameplay
         public bool Fire()
         {
             var velocity = body.linearVelocity;
-            var impulseMultiplier = Time.time < megaBulletUntil ? 1.8f : 1f;
+            var impulseMultiplier = MegaBulletActive ? 1.8f : 1f;
             if (!weapon.TryFire(Time.time, body.position, aim, tuning.Mass(baseMass), ref velocity, out var shot, impulseMultiplier)) return false;
             if (playerControlled) pendingNetworkFire = true;
             body.linearVelocity = velocity;
@@ -213,6 +219,13 @@ namespace BumperTanks.Gameplay
         public void MarkNetworkAbilityActivated()
         {
             if (playerControlled) pendingNetworkAbility = true;
+        }
+
+        public void SyncRealtimePowerUpState(bool nitroActive, bool megaBulletActive, bool magnetActive)
+        {
+            realtimeNitroActive = nitroActive;
+            realtimeMegaBulletActive = megaBulletActive;
+            realtimeMagnetActive = magnetActive;
         }
 
         public void ReconcileNetworkState(TankSnapshot snapshot, float correction)

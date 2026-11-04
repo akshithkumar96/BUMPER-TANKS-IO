@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using BumperTanks.Match;
 using UnityEngine;
 
 namespace BumperTanks.Network
@@ -53,9 +55,15 @@ namespace BumperTanks.Network
         }
 
         public static bool TryReadSnapshots(string json, out int tick, out TankSnapshot[] snapshots)
+            => TryReadSnapshotFrame(json, out tick, out snapshots, out _, out _);
+
+        public static bool TryReadSnapshotFrame(string json, out int tick, out TankSnapshot[] snapshots,
+            out GemPickupSnapshot[] gems, out PowerUpPickupSnapshot[] powerUps)
         {
             tick = -1;
             snapshots = Array.Empty<TankSnapshot>();
+            gems = Array.Empty<GemPickupSnapshot>();
+            powerUps = Array.Empty<PowerUpPickupSnapshot>();
             var data = JsonUtility.FromJson<RealtimeSnapshotMessage>(json);
             if (data == null || data.type != "snapshot" || data.tick < 0 || data.players == null ||
                 !Finite(data.elapsedSeconds) || !Finite(data.remainingSeconds)) return false;
@@ -67,6 +75,7 @@ namespace BumperTanks.Network
                     data.arenaBounds.halfWidth <= 0f || data.arenaBounds.halfHeight <= 0f) return false;
                 arenaSize = new Vector2(data.arenaBounds.halfWidth * 2f, data.arenaBounds.halfHeight * 2f);
             }
+            if (!TryReadGemPickups(data.gems, out gems) || !TryReadPowerUpPickups(data.powerUps, out powerUps)) return false;
             var hasAliveState = json.IndexOf("\"alive\"", StringComparison.Ordinal) >= 0;
             var parsed = new TankSnapshot[data.players.Length];
             for (var index = 0; index < data.players.Length; index++)
@@ -74,16 +83,54 @@ namespace BumperTanks.Network
                 var player = data.players[index];
                 if (player == null || player.playerId == 0 || player.position == null || player.velocity == null ||
                     !Finite(player.position.x) || !Finite(player.position.y) ||
-                    !Finite(player.velocity.x) || !Finite(player.velocity.y) || !Finite(player.health)) return false;
+                    !Finite(player.velocity.x) || !Finite(player.velocity.y) || !Finite(player.health) || player.gems < 0 || player.gems > 1000000) return false;
                 parsed[index] = new TankSnapshot(data.tick, player.playerId,
                     new Vector2(player.position.x, player.position.y),
                     new Vector2(player.velocity.x, player.velocity.y), player.health,
                     hasAliveState ? player.alive : player.health > 0f, player.eliminations,
                     data.phase, data.elapsedSeconds, data.remainingSeconds, data.winnerPlayerId,
-                    arenaSize, player.shielded, NormalizeArchetype(player.archetype), player.whirling);
+                    arenaSize, player.shielded, NormalizeArchetype(player.archetype), player.whirling,
+                    player.gems, player.nitroActive, player.megaBulletActive, player.magnetActive);
             }
             tick = data.tick;
             snapshots = parsed;
+            return true;
+        }
+
+        private static bool TryReadGemPickups(RealtimeGemPickupMessage[] messages, out GemPickupSnapshot[] gems)
+        {
+            gems = Array.Empty<GemPickupSnapshot>();
+            if (messages == null) return true;
+            if (messages.Length > 256) return false;
+            var parsed = new GemPickupSnapshot[messages.Length];
+            var ids = new HashSet<int>();
+            for (var index = 0; index < messages.Length; index++)
+            {
+                var item = messages[index];
+                if (item == null || item.pickupId <= 0 || !ids.Add(item.pickupId) || item.value < 1 || item.value > 1000 ||
+                    item.position == null || !Finite(item.position.x) || !Finite(item.position.y)) return false;
+                parsed[index] = new GemPickupSnapshot(item.pickupId, new Vector2(item.position.x, item.position.y), item.value);
+            }
+            gems = parsed;
+            return true;
+        }
+
+        private static bool TryReadPowerUpPickups(RealtimePowerUpPickupMessage[] messages, out PowerUpPickupSnapshot[] powerUps)
+        {
+            powerUps = Array.Empty<PowerUpPickupSnapshot>();
+            if (messages == null) return true;
+            if (messages.Length > 256) return false;
+            var parsed = new PowerUpPickupSnapshot[messages.Length];
+            var ids = new HashSet<int>();
+            for (var index = 0; index < messages.Length; index++)
+            {
+                var item = messages[index];
+                if (item == null || item.pickupId <= 0 || !ids.Add(item.pickupId) || item.position == null ||
+                    !Finite(item.position.x) || !Finite(item.position.y) ||
+                    !Enum.TryParse(item.type, false, out PowerUpType type) || !Enum.IsDefined(typeof(PowerUpType), type)) return false;
+                parsed[index] = new PowerUpPickupSnapshot(item.pickupId, type, new Vector2(item.position.x, item.position.y));
+            }
+            powerUps = parsed;
             return true;
         }
 

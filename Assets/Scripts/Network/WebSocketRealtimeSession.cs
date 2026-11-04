@@ -30,6 +30,7 @@ namespace BumperTanks.Network
         private static int nextWebGlId;
 
         public event Action<TankSnapshot> SnapshotReceived;
+        public event Action<RealtimePickupFrame> PickupFrameReceived;
         public event Action<RealtimeRoomJoined> RoomJoined;
         public event Action<string> Error;
         public event Action Disconnected;
@@ -275,8 +276,10 @@ namespace BumperTanks.Network
                 }
                 case "snapshot":
                 {
-                    if (!RealtimeMessageCodec.TryReadSnapshots(json, out _, out var snapshots))
+                    if (!RealtimeMessageCodec.TryReadSnapshotFrame(json, out var tick, out var snapshots, out var gems, out var powerUps))
                         throw new FormatException("Snapshot contains invalid tick/player state.");
+                    if (tick < latestSnapshotTick) return;
+                    PickupFrameReceived?.Invoke(new RealtimePickupFrame(tick, gems, powerUps));
                     foreach (var snapshot in snapshots)
                     {
                         if (snapshot.Tick < latestSnapshotTick) continue;
@@ -396,6 +399,7 @@ namespace BumperTanks.Network
             cancellation?.Dispose();
 #endif
             SnapshotReceived = null;
+            PickupFrameReceived = null;
             RoomJoined = null;
             Error = null;
             Disconnected = null;
@@ -469,9 +473,23 @@ namespace BumperTanks.Network
         public float remainingSeconds;
         public int winnerPlayerId;
         public RealtimeArenaBounds arenaBounds;
+        public RealtimeGemPickupMessage[] gems;
+        public RealtimePowerUpPickupMessage[] powerUps;
         public RealtimeSnapshotPlayer[] players;
     }
     [Serializable] internal sealed class RealtimeArenaBounds { public float halfWidth; public float halfHeight; }
+    [Serializable] internal sealed class RealtimeGemPickupMessage
+    {
+        public int pickupId;
+        public RealtimeVector position;
+        public int value;
+    }
+    [Serializable] internal sealed class RealtimePowerUpPickupMessage
+    {
+        public int pickupId;
+        public string type;
+        public RealtimeVector position;
+    }
     [Serializable] internal sealed class RealtimeSnapshotPlayer
     {
         public int playerId;
@@ -483,6 +501,10 @@ namespace BumperTanks.Network
         public bool shielded;
         public bool whirling;
         public string archetype;
+        public int gems;
+        public bool nitroActive;
+        public bool megaBulletActive;
+        public bool magnetActive;
     }
     [Serializable] internal sealed class RealtimeErrorMessage { public string type; public string message; public string code; }
     [Serializable] internal sealed class RealtimeVector { public float x; public float y; }
