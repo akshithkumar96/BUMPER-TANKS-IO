@@ -8,7 +8,7 @@ Unity 6.3 LTS with URP and C# is the delivery stack. The multiplayer path is a f
 
 - Every module must compile, include targeted automated tests, be manually smoke-tested in a development build, and have one focused Git commit.
 - Gameplay simulation stays deterministic where practical: fixed time steps, explicit tuning values, and no frame-rate-dependent movement.
-- Networking, ads, analytics, credentials, and production service identifiers are not introduced until their dedicated modules.
+- External service credentials remain environment-specific. Networking and telemetry must pass through their dedicated modules and never expose secrets in the client.
 
 ## Module 1 Foundation
 
@@ -42,7 +42,7 @@ Integrate the WebSocket relay: matchmaking target under three seconds, bot fill 
 
 Acceptance criteria: two clients complete a match; movement/projectiles stay within agreed error tolerances at simulated latency; no secrets are committed.
 
-Status: a native and WebGL Unity WebSocket client and ASP.NET Core room service are implemented. The server caps rooms at eight, waits up to 2.5 seconds for real players, fills remaining slots with bots, validates input, and broadcasts 30 Hz authoritative movement snapshots. The integration smoke test covers origin policy, queue fill, movement, room capacity, disconnects, and invalid input. Gameplay input/rendering is not yet connected to the client session; replicated combat, match phase, authoritative result receipts, durable distributed rooms, identity, reconnection, and two-client gameplay QA remain.
+Status: the native and WebGL Unity WebSocket client is wired into the arena. It sends 30 Hz movement, aim, fire, ability, and archetype input; predicts and reconciles the local tank; interpolates remote tanks; and follows server match timing and shrinking bounds. The ASP.NET Core relay caps rooms at eight, waits up to 2.5 seconds for players, fills remaining slots with bots, simulates authoritative movement, archetype combat, eliminations, and 30 Hz snapshots. Server smoke coverage exercises queue fill, capacity, input validation, combat, abilities, disconnects, and 30/35-second boundary changes. Online gem/power-up replication, projectile visuals/deflection, trusted match reward receipts, authenticated identity, durable distributed rooms, deployed endpoint configuration, reconnect UX, and two-device gameplay QA remain.
 
 Client-side snapshot interpolation and fixed-30-Hz prediction/reconciliation helpers are implemented and covered by Edit Mode tests. Fusion scaffolding remains optional and is not required for the selected relay path.
 
@@ -52,7 +52,7 @@ Create menu, matchmaking, HUD, results screen, accessibility controls, cosmetic 
 
 Acceptance criteria: full menu-to-rematch journey works on touch and mouse; cosmetics persist; essential UI is screen-reader and contrast reviewed.
 
-Status: front menu, local arena HUD, result/rematch, persistent color and trail garage cosmetics, daily spin, Battle Coins, and leaderboard are implemented. The garage now includes server-priced unlocks for flag attachments and procedural bump sounds; the server debits coins and persists ownership, while the client only equips owned items. Mobile TalkBack/VoiceOver actions cover menu, garage, leaderboard, and tank ability; garage controls use 44-pixel targets, descriptive text, and responsive positioning. Menu, HUD, result, garage, leaderboard, and accessibility action frames honor display safe areas, with Edit Mode coverage for insets and narrow/short layouts. Mobile screen-reader access to movement/fire, device review, matchmaking UI, and device-scale QA remain.
+Status: the front menu, offline arena, online matchmaking status, HUD, result/rematch, persistent color and trail garage cosmetics, daily spin, Battle Coins, and leaderboard are implemented. The garage includes server-priced flag and procedural bump-sound unlocks; the server debits coins and persists ownership, while the client equips only owned items. Mobile TalkBack/VoiceOver actions cover menu, garage, leaderboard, tank ability, and match connection status; garage controls use 44-pixel targets and safe-area-aware positioning. Mobile screen-reader access to movement/fire, device review, and device-scale QA remain.
 
 ## Module 6 Live Operations
 
