@@ -4,9 +4,11 @@
 import base64
 import json
 import os
+import queue
 import socket
 import struct
 import sys
+import threading
 import time
 
 
@@ -16,6 +18,8 @@ class WebSocketClient:
         self.socket = socket.create_connection((host, int(port)), timeout=5)
         self.socket.settimeout(5)
         self.buffer = bytearray()
+        self.messages = queue.Queue()
+        self.reading = True
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         request = (
             "GET /v1/realtime HTTP/1.1\r\n"
@@ -36,6 +40,8 @@ class WebSocketClient:
             status = header.split(b"\r\n", 1)[0].decode("ascii", errors="replace")
             self.socket.close()
             raise ConnectionError(f"WebSocket upgrade rejected: {status}")
+        self.reader = threading.Thread(target=self._read_messages, daemon=True)
+        self.reader.start()
 
     def send(self, message):
         payload = json.dumps(message, separators=(",", ":")).encode("utf-8") + b"\n"
@@ -51,6 +57,25 @@ class WebSocketClient:
         self.socket.sendall(header + mask + masked)
 
     def receive(self):
+        try:
+            return self.messages.get(timeout=5)
+        except queue.Empty as error:
+            raise socket.timeout() from error
+
+    def _read_messages(self):
+        while self.reading:
+            try:
+                message = self._receive_frame()
+            except socket.timeout:
+                continue
+            except (EOFError, OSError):
+                self.messages.put({"type": "close"})
+                return
+            self.messages.put(message)
+            if message.get("type") == "close":
+                return
+
+    def _receive_frame(self):
         first = self._read_exact(2)
         opcode = first[0] & 0x0F
         length = first[1] & 0x7F
@@ -69,9 +94,9 @@ class WebSocketClient:
             return {"type": "close"}
         if opcode == 9:
             self._send_control(10, payload)
-            return self.receive()
+            return self._receive_frame()
         if opcode != 1:
-            return self.receive()
+            return self._receive_frame()
         return json.loads(payload.decode("utf-8").rstrip("\r\n"))
 
     def _send_control(self, opcode, payload):
@@ -90,6 +115,7 @@ class WebSocketClient:
         return result
 
     def close(self):
+        self.reading = False
         try:
             self._send_control(8, struct.pack("!H", 1000))
         except OSError:
@@ -101,9 +127,12 @@ def player_id(index):
     return f"{index:032x}"
 
 
-def join(address, index, origin=None):
+def join(address, index, origin=None, archetype=None):
     client = WebSocketClient(address, origin=origin)
-    client.send({"type": "join", "playerId": player_id(index), "displayName": f"Smoke {index}"})
+    message = {"type": "join", "playerId": player_id(index), "displayName": f"Smoke {index}"}
+    if archetype is not None:
+        message["archetype"] = archetype
+    client.send(message)
     response = client.receive()
     assert response["type"] == "joined", response
     assert response["tickRate"] == 30, response
@@ -129,15 +158,13 @@ def wait_for(client, predicate, timeout=5, allow_error=False):
 
 
 def assert_no_snapshot(client, delay=0.35):
-    client.socket.settimeout(delay)
     try:
-        message = client.receive()
+        message = client.messages.get(timeout=delay)
         if message.get("type") == "snapshot":
             raise AssertionError("Underfilled room started before the 2.5-second backfill window")
-    except socket.timeout:
+        client.messages.put(message)
+    except queue.Empty:
         pass
-    finally:
-        client.socket.settimeout(5)
 
 
 def main():
@@ -154,17 +181,20 @@ def main():
         first, first_join = join(address, 1, origin="http://localhost:5173")
         clients.append(first)
         first_room_player_ids.append(first_join["playerId"])
-        second, second_join = join(address, 2)
+        second, second_join = join(address, 2, archetype="HeavyDozer")
         clients.append(second)
         first_room_player_ids.append(second_join["playerId"])
         assert second_join["roomId"] == first_join["roomId"], second_join
         assert_no_snapshot(first)
 
         for index in range(3, 9):
-            client, response = join(address, index)
+            archetype = ("SpeedyBumper", "HeavyDozer", "RicochetSpinner")[(index - 1) % 3]
+            client, response = join(address, index, archetype=archetype)
             clients.append(client)
             first_room_player_ids.append(response["playerId"])
             assert response["roomId"] == first_join["roomId"], response
+            assert any(player["playerId"] == response["playerId"] and player["archetype"] == archetype
+                       for player in response["players"]), response
 
         ninth, ninth_join = join(address, 9)
         clients.append(ninth)
@@ -201,23 +231,36 @@ def main():
         assert len(first_room_players) == 8, moved
         assert moved["phase"] == "opening" and 0 <= moved["remainingSeconds"] <= 90, moved
         assert moved["arenaBounds"] == {"halfWidth": 7.4, "halfHeight": 5.4}, moved
-        assert all("alive" in player and "eliminations" in player and "shielded" in player for player in first_room_players), moved
+        assert all("alive" in player and "eliminations" in player and "shielded" in player and "archetype" in player
+                   for player in first_room_players), moved
+        assert next(player for player in first_room_players if player["playerId"] == first_join["playerId"])["archetype"] == "SpeedyBumper", moved
+
+        first.send({
+            "type": "input", "tick": 2,
+            "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
+            "fire": False, "ability": False,
+        })
+        time.sleep(0.05)  # Respect the server's 60 Hz per-player input limit.
 
         # Three server-resolved shots must reduce health and eliminate the target tank.
         target_id = first_room_player_ids[4]
+        assert next(player for player in first_room_players if player["playerId"] == target_id)["archetype"] == "HeavyDozer", moved
         previous_health = next(player["health"] for player in moved["players"] if player["playerId"] == target_id)
         current_snapshot = moved
+        last_client_tick = 2
         for shot in range(3):
             shooter_state = next(player for player in current_snapshot["players"] if player["playerId"] == first_join["playerId"])
             target_state = next(player for player in current_snapshot["players"] if player["playerId"] == target_id)
             aim_x = target_state["position"]["x"] - shooter_state["position"]["x"]
             aim_y = target_state["position"]["y"] - shooter_state["position"]["y"]
             aim_length = max(0.0001, (aim_x * aim_x + aim_y * aim_y) ** 0.5)
+            input_tick = max(last_client_tick + 1, current_snapshot["tick"] + 1)
             first.send({
-                "type": "input", "tick": 2 + shot,
+                "type": "input", "tick": input_tick,
                 "movement": {"x": 0, "y": 0}, "aim": {"x": aim_x / aim_length, "y": aim_y / aim_length},
                 "fire": True, "ability": False,
             })
+            last_client_tick = input_tick
             hit = wait_for(first, lambda message: message.get("type") == "snapshot" and
                            next((player["health"] for player in message["players"] if player["playerId"] == target_id), 100) < previous_health,
                            timeout=2)
@@ -230,6 +273,44 @@ def main():
         assert not target_state["alive"] and target_state["health"] == 0, target_state
         shooter_state = next(player for player in hit["players"] if player["playerId"] == first_join["playerId"])
         assert shooter_state["eliminations"] == 1, shooter_state
+
+        second.send({
+            "type": "input", "tick": 1,
+            "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
+            "fire": False, "ability": True,
+        })
+        heavy_shield = wait_for(second, lambda message: message.get("type") == "snapshot" and
+                                next((player["shielded"] for player in message["players"]
+                                      if player["playerId"] == second_join["playerId"]), False))
+        assert next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])["health"] == 100, heavy_shield
+
+        spinner = clients[2]
+        spinner_id = first_room_player_ids[2]
+        spinner.send({
+            "type": "input", "tick": 1,
+            "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
+            "fire": False, "ability": True,
+        })
+        whirlwind = wait_for(spinner, lambda message: message.get("type") == "snapshot" and
+                             next((player.get("whirling", False) for player in message["players"]
+                                   if player["playerId"] == spinner_id), False))
+        assert next(player for player in whirlwind["players"] if player["playerId"] == spinner_id)["archetype"] == "RicochetSpinner", whirlwind
+
+        dash_tick = last_client_tick + 1
+        first.send({
+            "type": "input", "tick": dash_tick,
+            "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
+            "fire": False, "ability": True,
+        })
+        dash_snapshot = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                                 next((player["velocity"]["y"] for player in message["players"]
+                                       if player["playerId"] == first_join["playerId"]), 0) > 5)
+        assert next(player for player in dash_snapshot["players"] if player["playerId"] == first_join["playerId"])["velocity"]["y"] > 5, dash_snapshot
+        first.send({
+            "type": "input", "tick": dash_tick + 1,
+            "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
+            "fire": False, "ability": False,
+        })
 
         # Close the eighth real client in the first room and verify it disappears from snapshots.
         last_real_player = first_room_players[-1]["playerId"]
@@ -255,7 +336,7 @@ def main():
         assert 5.3 < next_boundary["arenaBounds"]["halfWidth"] < 5.6, next_boundary
         assert next_boundary["arenaBounds"]["halfWidth"] < collapse["arenaBounds"]["halfWidth"], next_boundary
 
-        print("Realtime WebSocket smoke passed: matchmaking, 8-player cap, 30 Hz snapshots, authoritative fire/elimination, 30-second collapse and 5-second boundary steps, bot fill, disconnect, and invalid-input rejection.")
+        print("Realtime WebSocket smoke passed: matchmaking, 8-player cap, 30 Hz snapshots, archetype movement/abilities, authoritative fire/recoil/elimination, 30/35-second boundary steps, bot fill, disconnect, and invalid-input rejection.")
     finally:
         for client in clients:
             if client is not None:

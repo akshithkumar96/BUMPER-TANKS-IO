@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -61,7 +62,7 @@ public sealed class RealtimeMatchHub : IDisposable
         {
             var joinFrame = await ReceiveFrameAsync(socket, cancellationToken);
             if (joinFrame is null) return;
-            if (!TryParseJoin(joinFrame, out var playerId, out var displayName, out var error))
+            if (!TryParseJoin(joinFrame, out var playerId, out var displayName, out var archetype, out var error))
             {
                 await connection.SendAsync(new { type = "error", code = error }, cancellationToken);
                 await CloseAsync(socket, WebSocketCloseStatus.PolicyViolation, "invalid join", cancellationToken);
@@ -99,7 +100,7 @@ public sealed class RealtimeMatchHub : IDisposable
                             rooms.Add(room.RoomId, room);
                         }
 
-                        if (room.TryAddPlayer(Interlocked.Increment(ref nextPlayerId), playerId, displayName, connection, out player))
+                        if (room.TryAddPlayer(Interlocked.Increment(ref nextPlayerId), playerId, displayName, archetype, connection, out player))
                         {
                             error = string.Empty;
                             break;
@@ -128,9 +129,9 @@ public sealed class RealtimeMatchHub : IDisposable
                     await connection.SendAsync(new { type = "error", code = "invalid_input" }, cancellationToken);
                     break;
                 }
-                if (!room.SubmitInput(player.PlayerId, input))
+                if (!room.SubmitInput(player.PlayerId, input, out var inputError))
                 {
-                    await connection.SendAsync(new { type = "error", code = "stale_or_out_of_range_input" }, cancellationToken);
+                    await connection.SendAsync(new { type = "error", code = inputError }, cancellationToken);
                     break;
                 }
             }
@@ -164,10 +165,11 @@ public sealed class RealtimeMatchHub : IDisposable
         }
     }
 
-    private static bool TryParseJoin(string frame, out string playerId, out string displayName, out string error)
+    private static bool TryParseJoin(string frame, out string playerId, out string displayName, out string archetype, out string error)
     {
         playerId = string.Empty;
         displayName = string.Empty;
+        archetype = "SpeedyBumper";
         error = "invalid_join";
         using var document = JsonDocument.Parse(frame);
         var root = document.RootElement;
@@ -177,6 +179,12 @@ public sealed class RealtimeMatchHub : IDisposable
         if (!root.TryGetProperty("displayName", out var name) || name.ValueKind != JsonValueKind.String) return false;
         var candidate = name.GetString()?.Trim() ?? string.Empty;
         if (candidate.Length is < 1 or > 24 || candidate.Any(character => !char.IsLetterOrDigit(character) && character is not ' ' and not '_' and not '-')) return false;
+        if (root.TryGetProperty("archetype", out var archetypeElement))
+        {
+            if (archetypeElement.ValueKind != JsonValueKind.String ||
+                archetypeElement.GetString() is not ("SpeedyBumper" or "HeavyDozer" or "RicochetSpinner")) return false;
+            archetype = archetypeElement.GetString()!;
+        }
         playerId = id.GetString()!;
         displayName = candidate;
         error = string.Empty;
@@ -285,7 +293,7 @@ public sealed class RealtimeMatchHub : IDisposable
         public bool IsEmpty { get { lock (sync) return players.Values.All(player => player.IsBot); } }
         public bool CanAcceptPlayer { get { lock (sync) return !disposed && players.Count < MaxPlayersPerRoom; } }
 
-        public bool TryAddPlayer(int id, string externalId, string displayName, RealtimeConnection connection, out RealtimePlayer? added)
+        public bool TryAddPlayer(int id, string externalId, string displayName, string archetype, RealtimeConnection connection, out RealtimePlayer? added)
         {
             lock (sync)
             {
@@ -295,7 +303,7 @@ public sealed class RealtimeMatchHub : IDisposable
                     return false;
                 }
                 var slot = players.Count;
-                var player = new RealtimePlayer(id, externalId, displayName, false, connection,
+                var player = new RealtimePlayer(id, externalId, displayName, archetype, false, connection,
                     new WireVector((slot % 4 - 1.5f) * 2.5f, slot / 4 == 0 ? -2.5f : 2.5f));
                 players.Add(id, player);
                 added = player;
@@ -313,7 +321,7 @@ public sealed class RealtimeMatchHub : IDisposable
                     roomId = RoomId,
                     playerId = joining.PlayerId,
                     tickRate = TickRate,
-                    players = players.Values.Select(player => new { playerId = player.PlayerId, displayName = player.DisplayName, isBot = player.IsBot }).ToArray()
+                    players = players.Values.Select(player => new { playerId = player.PlayerId, displayName = player.DisplayName, archetype = player.Archetype, isBot = player.IsBot }).ToArray()
                 };
             }
         }
@@ -323,19 +331,38 @@ public sealed class RealtimeMatchHub : IDisposable
             lock (sync) loop ??= Task.Run(RunLoopAsync);
         }
 
-        public bool SubmitInput(int playerId, RealtimeInput input)
+        public bool SubmitInput(int playerId, RealtimeInput input, out string error)
         {
             lock (sync)
             {
                 var timestamp = Stopwatch.GetTimestamp();
-                if (!players.TryGetValue(playerId, out var player) || player.IsBot || input.Tick <= player.LastInputTick ||
-                    input.Tick > tick + TickRate * 4 || timestamp - player.LastInputTimestamp < Stopwatch.Frequency / 60) return false;
+                if (!players.TryGetValue(playerId, out var player) || player.IsBot)
+                {
+                    error = "unknown_player";
+                    return false;
+                }
+                if (input.Tick <= player.LastInputTick)
+                {
+                    error = "stale_input_tick";
+                    return false;
+                }
+                if (input.Tick > tick + TickRate * 4)
+                {
+                    error = "future_input_tick";
+                    return false;
+                }
+                if (timestamp - player.LastInputTimestamp < Stopwatch.Frequency / 60)
+                {
+                    error = "input_rate_limited";
+                    return false;
+                }
                 player.LastInputTick = input.Tick;
                 player.LastInputTimestamp = timestamp;
                 player.Movement = input.Movement;
                 player.Aim = input.Aim;
-                player.FireRequested = input.Fire;
-                player.AbilityRequested = input.Ability;
+                if (input.Fire) player.FireBufferedUntilTick = Math.Max(player.FireBufferedUntilTick, tick + TickRate / 5);
+                if (input.Ability) player.AbilityBufferedUntilTick = Math.Max(player.AbilityBufferedUntilTick, tick + TickRate / 5);
+                error = string.Empty;
                 return true;
             }
         }
@@ -371,7 +398,7 @@ public sealed class RealtimeMatchHub : IDisposable
                             {
                                 var botId = nextBotId--;
                                 var slot = players.Count;
-                                players.Add(botId, new RealtimePlayer(botId, string.Empty, $"Fill Bot {Math.Abs(botId)}", true, null,
+                                players.Add(botId, new RealtimePlayer(botId, string.Empty, $"Fill Bot {Math.Abs(botId)}", ArchetypeForBot(botId), true, null,
                                     new WireVector((slot % 4 - 1.5f) * 2.5f, slot / 4 == 0 ? -2.5f : 2.5f)));
                             }
                             botsFilled = true;
@@ -381,6 +408,7 @@ public sealed class RealtimeMatchHub : IDisposable
                         var matchElapsed = TimeSpan.FromSeconds((Stopwatch.GetTimestamp() - matchStartedTimestamp) / (double)Stopwatch.Frequency);
                         var arenaBounds = GetArenaBounds(matchElapsed);
                         foreach (var player in players.Values) Simulate(player, tick, matchElapsed, arenaBounds);
+                        ResolveWhirlwinds();
                         ResolveShots();
                         ResolveBumps(matchElapsed);
                         ResolveMatchEnd(matchElapsed);
@@ -388,12 +416,14 @@ public sealed class RealtimeMatchHub : IDisposable
                         var states = players.Values.Select(player => new
                         {
                             playerId = player.PlayerId,
+                            archetype = player.Archetype,
                             position = new { x = player.Position.X, y = player.Position.Y },
                             velocity = new { x = player.Velocity.X, y = player.Velocity.Y },
                             health = player.Health,
                             alive = player.Alive,
                             eliminations = player.Eliminations,
-                            shielded = tick < player.ShieldUntilTick
+                            shielded = tick < player.ShieldUntilTick,
+                            whirling = tick < player.WhirlwindUntilTick
                         }).ToArray();
                         recipients = players.Values.Where(player => player.Connection is not null).Select(player => player.Connection!).ToArray();
                         snapshot = new
@@ -429,20 +459,53 @@ public sealed class RealtimeMatchHub : IDisposable
             const float dt = 1f / TickRate;
             if (!player.Alive || finished)
             {
-                player.FireRequested = false;
-                player.AbilityRequested = false;
+                player.FireBufferedUntilTick = -1;
+                player.AbilityBufferedUntilTick = -1;
                 return;
             }
             var movement = player.Movement;
+            var speedMultiplier = player.Archetype switch
+            {
+                "SpeedyBumper" => 1.3f,
+                "HeavyDozer" => 0.8f,
+                _ => 1f
+            };
             if (player.IsBot)
             {
                 var phase = tick * 0.015f + Math.Abs(player.PlayerId);
                 movement = new WireVector(MathF.Cos(phase), MathF.Sin(phase));
                 player.Aim = movement.LengthSquared > 0.001f ? movement.Normalized : new WireVector(0f, 1f);
             }
+            if (tick <= player.AbilityBufferedUntilTick && tick >= player.NextAbilityTick)
+            {
+                var abilityCooldown = player.Archetype switch
+                {
+                    "SpeedyBumper" => TickRate * 4,
+                    "HeavyDozer" => TickRate * 7,
+                    _ => TickRate * 5
+                };
+                switch (player.Archetype)
+                {
+                    case "SpeedyBumper":
+                        var dash = movement.LengthSquared > 0.01f ? movement.Normalized : player.Aim.Normalized;
+                        player.Velocity += dash * (14f / MassScale(player.Archetype));
+                        player.DashUntilTick = tick + TickRate * 2 / 5;
+                        break;
+                    case "HeavyDozer":
+                        player.ShieldUntilTick = tick + TickRate * 3;
+                        break;
+                    case "RicochetSpinner":
+                        player.WhirlwindUntilTick = tick + TickRate * 2;
+                        player.WhirlwindHitPlayerIds.Clear();
+                        break;
+                }
+                player.NextAbilityTick = tick + abilityCooldown;
+                player.AbilityBufferedUntilTick = -1;
+            }
+            if (tick > player.AbilityBufferedUntilTick) player.AbilityBufferedUntilTick = -1;
             var velocity = new WireVector(player.Velocity.X + movement.X * 30f * dt, player.Velocity.Y + movement.Y * 30f * dt);
             var speedSquared = velocity.LengthSquared;
-            const float maxSpeed = 8f;
+            var maxSpeed = 8f * speedMultiplier;
             if (speedSquared > maxSpeed * maxSpeed)
             {
                 velocity = velocity.Normalized * maxSpeed;
@@ -461,24 +524,32 @@ public sealed class RealtimeMatchHub : IDisposable
             if (y != position.Y) velocity = new WireVector(velocity.X, 0f);
             player.Position = new WireVector(x, y);
             player.Velocity = velocity;
-            if (player.AbilityRequested && tick >= player.NextAbilityTick)
-            {
-                player.ShieldUntilTick = tick + TickRate;
-                player.NextAbilityTick = tick + TickRate * 8;
-            }
-            if (player.FireRequested && tick >= player.NextFireTick)
+            if (tick >= player.NextFireTick && tick <= player.FireBufferedUntilTick)
             {
                 player.ShotPending = true;
-                player.NextFireTick = tick + TickRate / 2;
+                player.FireBufferedUntilTick = -1;
+                var shotImpulse = player.Archetype switch
+                {
+                    "SpeedyBumper" => 4.5f / MassScale(player.Archetype),
+                    "HeavyDozer" => 10.8f / MassScale(player.Archetype),
+                    _ => 6f / MassScale(player.Archetype)
+                };
+                player.Velocity -= player.Aim.Normalized * shotImpulse;
+                var cooldown = player.Archetype switch
+                {
+                    "SpeedyBumper" => Math.Max(1, (int)MathF.Ceiling(TickRate * 0.35f * 0.65f)),
+                    "HeavyDozer" => (int)MathF.Ceiling(TickRate * 0.35f * 1.8f),
+                    _ => (int)MathF.Ceiling(TickRate * 0.35f * 1.15f)
+                };
+                player.NextFireTick = tick + cooldown;
             }
+            if (tick > player.FireBufferedUntilTick) player.FireBufferedUntilTick = -1;
             if (player.Position.X < -arenaBounds.HalfWidth || player.Position.X > arenaBounds.HalfWidth ||
                 player.Position.Y < -arenaBounds.HalfHeight || player.Position.Y > arenaBounds.HalfHeight)
             {
-                player.Health -= matchElapsed.TotalSeconds >= 60d ? 1.5f : 0.75f;
+                player.Health -= (matchElapsed.TotalSeconds >= 60d ? 1.5f : 0.75f) * dt;
                 if (player.Health <= 0f) Eliminate(player, null);
             }
-            player.FireRequested = false;
-            player.AbilityRequested = false;
         }
 
         private void ResolveShots()
@@ -488,13 +559,13 @@ public sealed class RealtimeMatchHub : IDisposable
                 shooter.ShotPending = false;
                 var direction = shooter.Aim.Normalized;
                 RealtimePlayer? target = null;
-                var nearestDistance = 8f;
+                var nearestDistance = 12f;
                 foreach (var candidate in players.Values)
                 {
                     if (!candidate.Alive || candidate.PlayerId == shooter.PlayerId) continue;
                     var offset = candidate.Position - shooter.Position;
                     var along = Dot(offset, direction);
-                    if (along is < 0.4f or > 8f) continue;
+                    if (along is < 0.4f or > 12f) continue;
                     var perpendicular = offset - direction * along;
                     if (perpendicular.LengthSquared > 0.55f * 0.55f || along >= nearestDistance) continue;
                     target = candidate;
@@ -503,8 +574,24 @@ public sealed class RealtimeMatchHub : IDisposable
                 if (target is null) continue;
                 var damage = tick < target.ShieldUntilTick ? 12f : 34f;
                 target.Health = MathF.Max(0f, target.Health - damage);
-                target.Velocity += direction * (tick < target.ShieldUntilTick ? 0.8f : 1.5f);
+                var targetMass = MassScale(target.Archetype);
+                target.Velocity += direction * ((tick < target.ShieldUntilTick ? 0.8f : 1.5f) / targetMass);
                 if (target.Health <= 0f) Eliminate(target, shooter);
+            }
+        }
+
+        private void ResolveWhirlwinds()
+        {
+            foreach (var spinner in players.Values.Where(player => player.Alive && tick < player.WhirlwindUntilTick))
+            foreach (var target in players.Values)
+            {
+                if (!target.Alive || target.PlayerId == spinner.PlayerId || spinner.WhirlwindHitPlayerIds.Contains(target.PlayerId)) continue;
+                var offset = target.Position - spinner.Position;
+                if (offset.LengthSquared > 2.5f * 2.5f) continue;
+                var direction = offset.Normalized;
+                if (direction.LengthSquared < 0.001f) direction = new WireVector(1f, 0f);
+                target.Velocity += direction * 6f;
+                spinner.WhirlwindHitPlayerIds.Add(target.PlayerId);
             }
         }
 
@@ -523,22 +610,27 @@ public sealed class RealtimeMatchHub : IDisposable
                 if (distanceSquared >= minDistance * minDistance) continue;
                 var distance = MathF.Sqrt(distanceSquared);
                 var normal = distance > 0.0001f ? delta * (1f / distance) : new WireVector(1f, 0f);
-                var overlap = (minDistance - distance) * 0.5f;
-                first.Position -= normal * overlap;
-                second.Position += normal * overlap;
+                var overlap = minDistance - distance;
+                var firstInverseMass = 1f / MassScale(first.Archetype);
+                var secondInverseMass = 1f / MassScale(second.Archetype);
+                var inverseMassSum = firstInverseMass + secondInverseMass;
+                first.Position -= normal * (overlap * firstInverseMass / inverseMassSum);
+                second.Position += normal * (overlap * secondInverseMass / inverseMassSum);
                 var relativeSpeed = Dot(second.Velocity - first.Velocity, normal);
                 if (relativeSpeed > 0f) continue;
                 var suddenDeathMultiplier = matchElapsed.TotalSeconds >= 60d ? 1.5f : 1f;
+                var firstDashMultiplier = tick < first.DashUntilTick ? 2.5f : 1f;
+                var secondDashMultiplier = tick < second.DashUntilTick ? 2.5f : 1f;
                 var baseImpulse = MathF.Max(0.5f, -relativeSpeed + 1f) * suddenDeathMultiplier;
                 var firstFlankMultiplier = Dot(first.Aim, normal) < -0.5f ? 1.5f : 1f;
                 var secondFlankMultiplier = Dot(second.Aim, normal * -1f) < -0.5f ? 1.5f : 1f;
-                first.Velocity -= normal * (baseImpulse * firstFlankMultiplier);
-                second.Velocity += normal * (baseImpulse * secondFlankMultiplier);
+                first.Velocity -= normal * (baseImpulse * firstFlankMultiplier * secondDashMultiplier / MassScale(first.Archetype));
+                second.Velocity += normal * (baseImpulse * secondFlankMultiplier * firstDashMultiplier / MassScale(second.Archetype));
                 if (tick - first.LastBumpDamageTick >= TickRate * 2 && tick - second.LastBumpDamageTick >= TickRate * 2)
                 {
                     var bumpDamage = matchElapsed.TotalSeconds >= 60d ? 15f : 10f;
-                    if (first.ShieldUntilTick <= tick) first.Health = MathF.Max(0f, first.Health - bumpDamage);
-                    if (second.ShieldUntilTick <= tick) second.Health = MathF.Max(0f, second.Health - bumpDamage);
+                    if (first.Archetype != "HeavyDozer" || first.ShieldUntilTick <= tick) first.Health = MathF.Max(0f, first.Health - bumpDamage);
+                    if (second.Archetype != "HeavyDozer" || second.ShieldUntilTick <= tick) second.Health = MathF.Max(0f, second.Health - bumpDamage);
                     first.LastBumpDamageTick = second.LastBumpDamageTick = tick;
                     if (first.Health <= 0f) Eliminate(first, second);
                     if (second.Health <= 0f) Eliminate(second, first);
@@ -595,6 +687,20 @@ public sealed class RealtimeMatchHub : IDisposable
 
         private static float Dot(WireVector left, WireVector right) => left.X * right.X + left.Y * right.Y;
 
+        private static string ArchetypeForBot(int botId) => (Math.Abs(botId) % 3) switch
+        {
+            1 => "HeavyDozer",
+            2 => "RicochetSpinner",
+            _ => "SpeedyBumper"
+        };
+
+        private static float MassScale(string archetype) => archetype switch
+        {
+            "SpeedyBumper" => 0.7f,
+            "HeavyDozer" => 1.5f,
+            _ => 1f
+        };
+
         public void Dispose()
         {
             lock (sync)
@@ -611,11 +717,12 @@ public sealed class RealtimeMatchHub : IDisposable
 
     private sealed class RealtimePlayer
     {
-        public RealtimePlayer(int playerId, string externalId, string displayName, bool isBot, RealtimeConnection? connection, WireVector position)
+        public RealtimePlayer(int playerId, string externalId, string displayName, string archetype, bool isBot, RealtimeConnection? connection, WireVector position)
         {
             PlayerId = playerId;
             ExternalId = externalId;
             DisplayName = displayName;
+            Archetype = archetype;
             IsBot = isBot;
             Connection = connection;
             Position = position;
@@ -624,6 +731,7 @@ public sealed class RealtimeMatchHub : IDisposable
         public int PlayerId { get; }
         public string ExternalId { get; }
         public string DisplayName { get; }
+        public string Archetype { get; }
         public bool IsBot { get; }
         public RealtimeConnection? Connection { get; }
         public WireVector Position { get; set; }
@@ -638,9 +746,12 @@ public sealed class RealtimeMatchHub : IDisposable
         public int NextFireTick { get; set; }
         public int NextAbilityTick { get; set; }
         public int ShieldUntilTick { get; set; }
+        public int WhirlwindUntilTick { get; set; }
+        public int DashUntilTick { get; set; }
         public int LastBumpDamageTick { get; set; }
-        public bool FireRequested { get; set; }
-        public bool AbilityRequested { get; set; }
+        public int FireBufferedUntilTick { get; set; } = -1;
+        public HashSet<int> WhirlwindHitPlayerIds { get; } = new();
+        public int AbilityBufferedUntilTick { get; set; } = -1;
         public bool ShotPending { get; set; }
     }
 
