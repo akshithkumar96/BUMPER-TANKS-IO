@@ -1,13 +1,12 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 
 /// <summary>
-/// First-party WebSocket matchmaking and authoritative movement prototype.
-/// Combat, match scoring, persistence, and reward receipts are intentionally not
-/// replicated here yet; never use this transport to award production results.
+/// First-party WebSocket matchmaking and authoritative movement/combat prototype.
+/// Match receipts and rewards remain outside this transport and require trusted
+/// attestation before they can be used for production rewards.
 /// </summary>
 public sealed class RealtimeMatchHub : IDisposable
 {
@@ -16,6 +15,7 @@ public sealed class RealtimeMatchHub : IDisposable
     public const int MaxIncomingBytes = 4096;
     public const int MaxActiveConnections = 2048;
     public const int MaxActiveRooms = 256;
+    public const int MatchDurationSeconds = 90;
     public static readonly TimeSpan BotFillDelay = TimeSpan.FromMilliseconds(2500);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -274,6 +274,9 @@ public sealed class RealtimeMatchHub : IDisposable
         private int nextBotId = -1;
         private bool started;
         private bool botsFilled;
+        private bool finished;
+        private int? winnerPlayerId;
+        private long matchStartedTimestamp;
         private bool disposed;
 
         public RealtimeRoom(string roomId) => RoomId = roomId;
@@ -356,7 +359,11 @@ public sealed class RealtimeMatchHub : IDisposable
                     {
                         if (disposed || players.Values.All(player => player.IsBot)) return;
                         var realPlayerCount = players.Values.Count(player => !player.IsBot);
-                        if (!started && (realPlayerCount >= MaxPlayersPerRoom || elapsed.Elapsed >= BotFillDelay)) started = true;
+                        if (!started && (realPlayerCount >= MaxPlayersPerRoom || elapsed.Elapsed >= BotFillDelay))
+                        {
+                            started = true;
+                            matchStartedTimestamp = Stopwatch.GetTimestamp();
+                        }
                         if (!started) continue;
                         if (!botsFilled && elapsed.Elapsed >= BotFillDelay)
                         {
@@ -371,16 +378,32 @@ public sealed class RealtimeMatchHub : IDisposable
                         }
 
                         tick++;
-                        foreach (var player in players.Values) Simulate(player, tick);
+                        var matchElapsed = TimeSpan.FromSeconds((Stopwatch.GetTimestamp() - matchStartedTimestamp) / (double)Stopwatch.Frequency);
+                        var arenaBounds = GetArenaBounds(matchElapsed);
+                        foreach (var player in players.Values) Simulate(player, tick, matchElapsed, arenaBounds);
+                        ResolveShots();
+                        ResolveBumps(matchElapsed);
+                        ResolveMatchEnd(matchElapsed);
+                        var phase = finished ? "finished" : GetPhase(matchElapsed);
                         var states = players.Values.Select(player => new
                         {
                             playerId = player.PlayerId,
                             position = new { x = player.Position.X, y = player.Position.Y },
                             velocity = new { x = player.Velocity.X, y = player.Velocity.Y },
-                            health = player.Health
+                            health = player.Health,
+                            alive = player.Alive,
+                            eliminations = player.Eliminations,
+                            shielded = tick < player.ShieldUntilTick
                         }).ToArray();
                         recipients = players.Values.Where(player => player.Connection is not null).Select(player => player.Connection!).ToArray();
-                        snapshot = new { type = "snapshot", tick, players = states };
+                        snapshot = new
+                        {
+                            type = "snapshot", tick, players = states, phase,
+                            elapsedSeconds = MathF.Min((float)matchElapsed.TotalSeconds, MatchDurationSeconds),
+                            remainingSeconds = MathF.Max(0f, MatchDurationSeconds - (float)matchElapsed.TotalSeconds),
+                            arenaBounds = new { halfWidth = arenaBounds.HalfWidth, halfHeight = arenaBounds.HalfHeight },
+                            winnerPlayerId
+                        };
                     }
                     if (snapshot is not null && recipients.Length > 0)
                         await Task.WhenAll(recipients.Select(connection => SendSnapshotSafelyAsync(connection, snapshot, token)));
@@ -401,9 +424,15 @@ public sealed class RealtimeMatchHub : IDisposable
             catch (ObjectDisposedException) { }
         }
 
-        private static void Simulate(RealtimePlayer player, int tick)
+        private void Simulate(RealtimePlayer player, int tick, TimeSpan matchElapsed, ArenaBounds arenaBounds)
         {
             const float dt = 1f / TickRate;
+            if (!player.Alive || finished)
+            {
+                player.FireRequested = false;
+                player.AbilityRequested = false;
+                return;
+            }
             var movement = player.Movement;
             if (player.IsBot)
             {
@@ -432,9 +461,139 @@ public sealed class RealtimeMatchHub : IDisposable
             if (y != position.Y) velocity = new WireVector(velocity.X, 0f);
             player.Position = new WireVector(x, y);
             player.Velocity = velocity;
+            if (player.AbilityRequested && tick >= player.NextAbilityTick)
+            {
+                player.ShieldUntilTick = tick + TickRate;
+                player.NextAbilityTick = tick + TickRate * 8;
+            }
+            if (player.FireRequested && tick >= player.NextFireTick)
+            {
+                player.ShotPending = true;
+                player.NextFireTick = tick + TickRate / 2;
+            }
+            if (player.Position.X < -arenaBounds.HalfWidth || player.Position.X > arenaBounds.HalfWidth ||
+                player.Position.Y < -arenaBounds.HalfHeight || player.Position.Y > arenaBounds.HalfHeight)
+            {
+                player.Health -= matchElapsed.TotalSeconds >= 60d ? 1.5f : 0.75f;
+                if (player.Health <= 0f) Eliminate(player, null);
+            }
             player.FireRequested = false;
             player.AbilityRequested = false;
         }
+
+        private void ResolveShots()
+        {
+            foreach (var shooter in players.Values.Where(player => player.Alive && player.ShotPending))
+            {
+                shooter.ShotPending = false;
+                var direction = shooter.Aim.Normalized;
+                RealtimePlayer? target = null;
+                var nearestDistance = 8f;
+                foreach (var candidate in players.Values)
+                {
+                    if (!candidate.Alive || candidate.PlayerId == shooter.PlayerId) continue;
+                    var offset = candidate.Position - shooter.Position;
+                    var along = Dot(offset, direction);
+                    if (along is < 0.4f or > 8f) continue;
+                    var perpendicular = offset - direction * along;
+                    if (perpendicular.LengthSquared > 0.55f * 0.55f || along >= nearestDistance) continue;
+                    target = candidate;
+                    nearestDistance = along;
+                }
+                if (target is null) continue;
+                var damage = tick < target.ShieldUntilTick ? 12f : 34f;
+                target.Health = MathF.Max(0f, target.Health - damage);
+                target.Velocity += direction * (tick < target.ShieldUntilTick ? 0.8f : 1.5f);
+                if (target.Health <= 0f) Eliminate(target, shooter);
+            }
+        }
+
+        private void ResolveBumps(TimeSpan matchElapsed)
+        {
+            var alive = players.Values.Where(player => player.Alive).ToArray();
+            for (var firstIndex = 0; firstIndex < alive.Length; firstIndex++)
+            for (var secondIndex = firstIndex + 1; secondIndex < alive.Length; secondIndex++)
+            {
+                var first = alive[firstIndex];
+                var second = alive[secondIndex];
+                if (!first.Alive || !second.Alive) continue;
+                var delta = second.Position - first.Position;
+                var distanceSquared = delta.LengthSquared;
+                const float minDistance = 1.1f;
+                if (distanceSquared >= minDistance * minDistance) continue;
+                var distance = MathF.Sqrt(distanceSquared);
+                var normal = distance > 0.0001f ? delta * (1f / distance) : new WireVector(1f, 0f);
+                var overlap = (minDistance - distance) * 0.5f;
+                first.Position -= normal * overlap;
+                second.Position += normal * overlap;
+                var relativeSpeed = Dot(second.Velocity - first.Velocity, normal);
+                if (relativeSpeed > 0f) continue;
+                var suddenDeathMultiplier = matchElapsed.TotalSeconds >= 60d ? 1.5f : 1f;
+                var baseImpulse = MathF.Max(0.5f, -relativeSpeed + 1f) * suddenDeathMultiplier;
+                var firstFlankMultiplier = Dot(first.Aim, normal) < -0.5f ? 1.5f : 1f;
+                var secondFlankMultiplier = Dot(second.Aim, normal * -1f) < -0.5f ? 1.5f : 1f;
+                first.Velocity -= normal * (baseImpulse * firstFlankMultiplier);
+                second.Velocity += normal * (baseImpulse * secondFlankMultiplier);
+                if (tick - first.LastBumpDamageTick >= TickRate * 2 && tick - second.LastBumpDamageTick >= TickRate * 2)
+                {
+                    var bumpDamage = matchElapsed.TotalSeconds >= 60d ? 15f : 10f;
+                    if (first.ShieldUntilTick <= tick) first.Health = MathF.Max(0f, first.Health - bumpDamage);
+                    if (second.ShieldUntilTick <= tick) second.Health = MathF.Max(0f, second.Health - bumpDamage);
+                    first.LastBumpDamageTick = second.LastBumpDamageTick = tick;
+                    if (first.Health <= 0f) Eliminate(first, second);
+                    if (second.Health <= 0f) Eliminate(second, first);
+                }
+            }
+        }
+
+        private void ResolveMatchEnd(TimeSpan matchElapsed)
+        {
+            if (finished) return;
+            var alivePlayers = players.Values.Where(player => player.Alive).ToArray();
+            if (alivePlayers.Length <= 1 && players.Count >= 2)
+            {
+                finished = true;
+                winnerPlayerId = alivePlayers.FirstOrDefault()?.PlayerId;
+                return;
+            }
+            if (matchElapsed.TotalSeconds >= MatchDurationSeconds)
+            {
+                finished = true;
+                winnerPlayerId = alivePlayers.OrderByDescending(player => player.Health)
+                    .ThenByDescending(player => player.Eliminations).FirstOrDefault()?.PlayerId;
+            }
+        }
+
+        private void Eliminate(RealtimePlayer player, RealtimePlayer? killer)
+        {
+            if (!player.Alive) return;
+            player.Alive = false;
+            player.Health = 0f;
+            player.Velocity = new WireVector(0f, 0f);
+            if (killer is not null && killer.PlayerId != player.PlayerId) killer.Eliminations++;
+        }
+
+        private static string GetPhase(TimeSpan elapsed) => elapsed.TotalSeconds >= MatchDurationSeconds
+            ? "finished"
+            : elapsed.TotalSeconds >= 60d ? "sudden_death"
+            : elapsed.TotalSeconds >= 30d ? "collapse" : "opening";
+
+        private static ArenaBounds GetArenaBounds(TimeSpan elapsed)
+        {
+            const float initialHalfWidth = 7.4f;
+            const float initialHalfHeight = 5.4f;
+            const float finalHalfSize = 1.5f;
+            if (elapsed.TotalSeconds < 30d) return new ArenaBounds(initialHalfWidth, initialHalfHeight);
+            if (elapsed.TotalSeconds >= 60d) return new ArenaBounds(finalHalfSize, finalHalfSize);
+
+            var shrinkStep = Math.Clamp((int)((elapsed.TotalSeconds - 30d) / 5d) + 1, 1, 6);
+            var progress = shrinkStep / 6f;
+            return new ArenaBounds(
+                initialHalfWidth + (finalHalfSize - initialHalfWidth) * progress,
+                initialHalfHeight + (finalHalfSize - initialHalfHeight) * progress);
+        }
+
+        private static float Dot(WireVector left, WireVector right) => left.X * right.X + left.Y * right.Y;
 
         public void Dispose()
         {
@@ -472,10 +631,17 @@ public sealed class RealtimeMatchHub : IDisposable
         public WireVector Movement { get; set; }
         public WireVector Aim { get; set; } = new(0f, 1f);
         public float Health { get; set; } = 100f;
+        public bool Alive { get; set; } = true;
+        public int Eliminations { get; set; }
         public int LastInputTick { get; set; } = -1;
         public long LastInputTimestamp { get; set; }
+        public int NextFireTick { get; set; }
+        public int NextAbilityTick { get; set; }
+        public int ShieldUntilTick { get; set; }
+        public int LastBumpDamageTick { get; set; }
         public bool FireRequested { get; set; }
         public bool AbilityRequested { get; set; }
+        public bool ShotPending { get; set; }
     }
 
     private sealed class RealtimeConnection : IDisposable
@@ -508,6 +674,7 @@ public sealed class RealtimeMatchHub : IDisposable
     }
 
     private readonly record struct RealtimeInput(int Tick, WireVector Movement, WireVector Aim, bool Fire, bool Ability);
+    private readonly record struct ArenaBounds(float HalfWidth, float HalfHeight);
     private readonly record struct WireVector(float X, float Y)
     {
         public float LengthSquared => X * X + Y * Y;
@@ -519,6 +686,8 @@ public sealed class RealtimeMatchHub : IDisposable
                 return length > 0f ? new WireVector(X / length, Y / length) : new WireVector(0f, 0f);
             }
         }
+        public static WireVector operator +(WireVector left, WireVector right) => new(left.X + right.X, left.Y + right.Y);
+        public static WireVector operator -(WireVector left, WireVector right) => new(left.X - right.X, left.Y - right.Y);
         public static WireVector operator *(WireVector vector, float scalar) => new(vector.X * scalar, vector.Y * scalar);
     }
 }
