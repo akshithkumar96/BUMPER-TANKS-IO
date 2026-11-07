@@ -192,7 +192,7 @@ namespace BumperTanks.Gameplay
             if (realtime != null && !realtime.IsConnected && !realtime.IsConnecting)
             {
                 realtimeStatus = "Connecting to online matchmaking…";
-                realtime.Connect(realtimeEndpoint, localPlayerId, "Player", player != null ? player.Archetype.ToString() : "SpeedyBumper");
+                GameServiceClient.Instance?.ConnectRealtime(realtime, realtimeEndpoint, "Player", player != null ? player.Archetype.ToString() : "SpeedyBumper");
             }
             if (matchStarted) return;
             matchStarted = true;

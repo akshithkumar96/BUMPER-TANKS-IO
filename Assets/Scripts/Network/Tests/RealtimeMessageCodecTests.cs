@@ -47,6 +47,16 @@ namespace BumperTanks.Network.Tests
         }
 
         [Test]
+        public void JoinMessageCarriesServerIssuedAccessToken()
+        {
+            const string playerId = "0123456789abcdef0123456789abcdef";
+            const string token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+            var decoded = JsonUtility.FromJson<JoinShape>(RealtimeMessageCodec.EncodeJoin(playerId, "Tank", accessToken: token));
+
+            Assert.That(decoded.accessToken, Is.EqualTo(token));
+        }
+
+        [Test]
         public void JoinedMessageParsesAssignedRoomAndPlayer()
         {
             const string json = "{\"type\":\"joined\",\"roomId\":\"room-01\",\"playerId\":3,\"tickRate\":30,\"players\":[{\"playerId\":3,\"displayName\":\"Ace\"}]}";
@@ -155,7 +165,7 @@ namespace BumperTanks.Network.Tests
         }
 
         [System.Serializable]
-        private sealed class JoinShape { public string type; public string playerId; public string displayName; public string archetype; }
+        private sealed class JoinShape { public string type; public string playerId; public string displayName; public string archetype; public string accessToken; }
 
         [System.Serializable]
         private sealed class InputShape

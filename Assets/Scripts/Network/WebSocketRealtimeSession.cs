@@ -48,6 +48,7 @@ namespace BumperTanks.Network
 #endif
         private Uri endpoint;
         private string playerId;
+        private string accessToken;
         private string displayName;
         private string archetype = "SpeedyBumper";
         private int webGlId;
@@ -67,7 +68,7 @@ namespace BumperTanks.Network
         private readonly SemaphoreSlim sendLock = new(1, 1);
 #endif
 
-        public void Connect(string url, string stablePlayerId, string name, string tankArchetype = "SpeedyBumper")
+        public void Connect(string url, string stablePlayerId, string name, string tankArchetype = "SpeedyBumper", string bearerToken = "")
         {
             if (!Uri.TryCreate(url, UriKind.Absolute, out endpoint) ||
                 (endpoint.Scheme != "ws" && endpoint.Scheme != "wss"))
@@ -82,6 +83,7 @@ namespace BumperTanks.Network
             }
 
             playerId = stablePlayerId;
+            accessToken = bearerToken ?? string.Empty;
             displayName = NormalizeDisplayName(name);
             archetype = RealtimeMessageCodec.NormalizeArchetype(tankArchetype);
             explicitDisconnect = false;
@@ -187,7 +189,7 @@ namespace BumperTanks.Network
         }
 #endif
 
-        private string BuildJoinFrame() => RealtimeMessageCodec.EncodeJoin(playerId, displayName, archetype) + "\n";
+        private string BuildJoinFrame() => RealtimeMessageCodec.EncodeJoin(playerId, displayName, archetype, accessToken) + "\n";
 
         private void SendFrame(string frame)
         {
@@ -446,7 +448,7 @@ namespace BumperTanks.Network
 
     [Serializable] public sealed class RealtimePlayerInfo { public int playerId; public string displayName; public string archetype; public bool isBot; }
     [Serializable] internal sealed class RealtimeMessageHeader { public string type; }
-    [Serializable] internal sealed class RealtimeJoinMessage { public string type; public string playerId; public string displayName; public string archetype; }
+    [Serializable] internal sealed class RealtimeJoinMessage { public string type; public string playerId; public string displayName; public string archetype; public string accessToken; }
     [Serializable] internal sealed class RealtimeInputMessage
     {
         public string type;

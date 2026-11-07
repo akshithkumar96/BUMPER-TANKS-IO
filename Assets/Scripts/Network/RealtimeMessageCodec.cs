@@ -8,7 +8,7 @@ namespace BumperTanks.Network
     /// <summary>Wire-format codec shared by transports and protocol tests.</summary>
     public static class RealtimeMessageCodec
     {
-        public static string EncodeJoin(string stablePlayerId, string displayName, string archetype = "SpeedyBumper")
+        public static string EncodeJoin(string stablePlayerId, string displayName, string archetype = "SpeedyBumper", string accessToken = "")
         {
             if (string.IsNullOrEmpty(stablePlayerId) || stablePlayerId.Length != 32)
                 throw new ArgumentException("Player ID must contain 32 characters.", nameof(stablePlayerId));
@@ -17,7 +17,8 @@ namespace BumperTanks.Network
                 type = "join",
                 playerId = stablePlayerId,
                 displayName = displayName ?? string.Empty,
-                archetype = NormalizeArchetype(archetype)
+                archetype = NormalizeArchetype(archetype),
+                accessToken = accessToken ?? string.Empty
             });
         }
 

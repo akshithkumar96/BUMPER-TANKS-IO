@@ -10,12 +10,56 @@ namespace BumperTanks.Frontend
         [SerializeField] private string baseUrl = "http://127.0.0.1:5188";
 
         public static GameServiceClient Instance { get; private set; }
+        public bool IdentityReady { get; private set; }
+        public string IdentityError { get; private set; }
 
         private void Awake()
         {
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            StartCoroutine(InitializeIdentity());
+        }
+
+        public void ConnectRealtime(BumperTanks.Network.WebSocketRealtimeSession session, string url, string displayName, string archetype)
+        {
+            StartCoroutine(ConnectRealtimeWhenReady(session, url, displayName, archetype));
+        }
+
+        private IEnumerator ConnectRealtimeWhenReady(BumperTanks.Network.WebSocketRealtimeSession session, string url, string displayName, string archetype)
+        {
+            while (!IdentityReady && string.IsNullOrEmpty(IdentityError)) yield return null;
+            if (!IdentityReady) { Debug.LogWarning("Realtime identity unavailable: " + IdentityError); yield break; }
+            session.Connect(url, ProfileStore.GetServerPlayerId(), displayName, archetype, ProfileStore.GetAccessToken());
+        }
+
+        private IEnumerator InitializeIdentity()
+        {
+            var existingId = ProfileStore.GetServerPlayerId();
+            var existingToken = ProfileStore.GetAccessToken();
+            if (!string.IsNullOrEmpty(existingId) && !string.IsNullOrEmpty(existingToken))
+            {
+                IdentityReady = true;
+                yield break;
+            }
+
+            using var request = new UnityWebRequest(baseUrl.TrimEnd('/') + "/v1/identity/anonymous", UnityWebRequest.kHttpVerbPOST);
+            request.uploadHandler = new UploadHandlerRaw(Array.Empty<byte>());
+            request.downloadHandler = new DownloadHandlerBuffer();
+            yield return request.SendWebRequest();
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                IdentityError = request.error;
+                yield break;
+            }
+            var identity = JsonUtility.FromJson<AnonymousIdentity>(request.downloadHandler.text);
+            if (identity == null || string.IsNullOrEmpty(identity.playerId) || string.IsNullOrEmpty(identity.accessToken))
+            {
+                IdentityError = "Invalid identity response.";
+                yield break;
+            }
+            ProfileStore.SaveServerIdentity(identity.playerId, identity.accessToken);
+            IdentityReady = true;
         }
 
         public void SubmitMatch(string playerId, string matchId, int gems, int eliminations, Action<string> onError = null)
@@ -71,10 +115,14 @@ namespace BumperTanks.Frontend
 
         private IEnumerator PostJsonResponse(string path, string json, Action<string> onSuccess, Action<string> onError)
         {
+            while (!IdentityReady && string.IsNullOrEmpty(IdentityError)) yield return null;
+            if (!IdentityReady) { onError?.Invoke("Identity unavailable: " + IdentityError); yield break; }
+            json = json.Replace(ProfileStore.GetOrCreatePlayerId(), ProfileStore.GetServerPlayerId());
             using var request = new UnityWebRequest(baseUrl.TrimEnd('/') + path, UnityWebRequest.kHttpVerbPOST);
             request.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(json));
             request.downloadHandler = new DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json");
+            request.SetRequestHeader("Authorization", "Bearer " + ProfileStore.GetAccessToken());
             yield return request.SendWebRequest();
             if (request.result != UnityWebRequest.Result.Success) onError?.Invoke(request.error);
             else onSuccess?.Invoke(request.downloadHandler.text);
@@ -91,10 +139,14 @@ namespace BumperTanks.Frontend
         private IEnumerator GetJson(string path, Action<string> onSuccess, Action<string> onError)
         {
             using var request = UnityWebRequest.Get(baseUrl.TrimEnd('/') + path);
+            if (!string.IsNullOrEmpty(ProfileStore.GetAccessToken())) request.SetRequestHeader("Authorization", "Bearer " + ProfileStore.GetAccessToken());
             yield return request.SendWebRequest();
             if (request.result != UnityWebRequest.Result.Success) onError?.Invoke(request.error);
             else onSuccess?.Invoke(request.downloadHandler.text);
         }
+
+        [Serializable]
+        private sealed class AnonymousIdentity { public string playerId; public string accessToken; }
 
         [Serializable]
         private sealed class MatchResult
