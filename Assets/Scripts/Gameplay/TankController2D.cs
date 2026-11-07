@@ -38,6 +38,8 @@ namespace BumperTanks.Gameplay
         private bool realtimeNitroActive;
         private bool realtimeMegaBulletActive;
         private bool realtimeMagnetActive;
+        private float accessibleSteeringUntil;
+        private Vector2 accessibleSteering;
 
         public bool IsPlayer => playerControlled;
         public Vector2 Position => body.position;
@@ -92,7 +94,15 @@ namespace BumperTanks.Gameplay
                 if (aimTrajectory != null) aimTrajectory.enabled = false;
                 return;
             }
-            if (Input.touchCount > 0)
+            if (AccessibleUiBridge.AssistiveMatchControlsVisible)
+            {
+                steering = Time.unscaledTime < accessibleSteeringUntil ? accessibleSteering : Vector2.zero;
+            }
+            else if (Time.unscaledTime < accessibleSteeringUntil)
+            {
+                steering = accessibleSteering;
+            }
+            else if (Input.touchCount > 0)
             {
                 ReadTouchInputs();
             }
@@ -219,6 +229,23 @@ namespace BumperTanks.Gameplay
         public void MarkNetworkAbilityActivated()
         {
             if (playerControlled) pendingNetworkAbility = true;
+        }
+
+        /// <summary>Moves in a short, predictable pulse for assistive controls.</summary>
+        public void SetAccessibleSteering(Vector2 direction, float durationSeconds = 0.45f)
+        {
+            if (!playerControlled) return;
+            accessibleSteering = Vector2.ClampMagnitude(direction, 1f);
+            steering = accessibleSteering;
+            accessibleSteeringUntil = Time.unscaledTime + Mathf.Clamp(durationSeconds, 0.1f, 1.5f);
+        }
+
+        /// <summary>Aims in a cardinal direction and fires for one-shot accessible controls.</summary>
+        public void AccessibleAimAndFire(Vector2 direction)
+        {
+            if (!playerControlled || direction.sqrMagnitude < 0.01f) return;
+            aim = direction.normalized;
+            Fire();
         }
 
         public void SyncRealtimePowerUpState(bool nitroActive, bool megaBulletActive, bool magnetActive)
