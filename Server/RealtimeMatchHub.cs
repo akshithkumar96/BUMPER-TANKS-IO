@@ -275,6 +275,8 @@ public sealed class RealtimeMatchHub : IDisposable
     {
         private readonly object sync = new();
         private readonly Dictionary<int, RealtimePlayer> players = new();
+        private readonly List<RealtimeGemPickup> gems = new();
+        private readonly List<RealtimePowerUpPickup> powerUps = new();
         private readonly Stopwatch elapsed = Stopwatch.StartNew();
         private readonly CancellationTokenSource stop = new();
         private Task? loop;
@@ -287,7 +289,34 @@ public sealed class RealtimeMatchHub : IDisposable
         private long matchStartedTimestamp;
         private bool disposed;
 
-        public RealtimeRoom(string roomId) => RoomId = roomId;
+        public RealtimeRoom(string roomId)
+        {
+            RoomId = roomId;
+            var seed = StableSeed(roomId);
+            var jitter = new WireVector(((int)(seed % 5) - 2) * 0.1f, ((int)((seed / 5) % 5) - 2) * 0.1f);
+            WireVector Place(float x, float y) => new(x + jitter.X, y + jitter.Y);
+            var gemPositions = new[]
+            {
+                Place(-2.6f, -1.3f), Place(4f, 0f), Place(2f, -4f),
+                Place(6f, 0f), Place(-6f, 4f), Place(0f, 0f),
+                Place(6f, 4f), Place(-4f, 0f), Place(5f, 3f),
+                Place(-1f, 4f), Place(1f, -4f), Place(5f, -3f)
+            };
+            for (var index = 0; index < gemPositions.Length; index++)
+                gems.Add(new RealtimeGemPickup(index + 1, gemPositions[index]));
+
+            // Deterministic room-seeded drops are kept away from all player spawn slots.
+            powerUps.Add(new RealtimePowerUpPickup(1, "MegaBullet", Place(-2.6f, -1.3f)));
+            powerUps.Add(new RealtimePowerUpPickup(2, "Nitro", Place(-0.1f, -1.3f)));
+            powerUps.Add(new RealtimePowerUpPickup(3, "Magnet", Place(2.4f, -1.3f)));
+        }
+
+        private static uint StableSeed(string value)
+        {
+            var hash = 2166136261u;
+            foreach (var character in value) hash = (hash ^ character) * 16777619u;
+            return hash;
+        }
         public string RoomId { get; }
         public long CreatedAt { get; } = Stopwatch.GetTimestamp();
         public bool IsEmpty { get { lock (sync) return players.Values.All(player => player.IsBot); } }
@@ -408,6 +437,7 @@ public sealed class RealtimeMatchHub : IDisposable
                         var matchElapsed = TimeSpan.FromSeconds((Stopwatch.GetTimestamp() - matchStartedTimestamp) / (double)Stopwatch.Frequency);
                         var arenaBounds = GetArenaBounds(matchElapsed);
                         foreach (var player in players.Values) Simulate(player, tick, matchElapsed, arenaBounds);
+                        ResolvePickups(matchElapsed);
                         ResolveWhirlwinds();
                         ResolveShots();
                         ResolveBumps(matchElapsed);
@@ -423,7 +453,11 @@ public sealed class RealtimeMatchHub : IDisposable
                             alive = player.Alive,
                             eliminations = player.Eliminations,
                             shielded = tick < player.ShieldUntilTick,
-                            whirling = tick < player.WhirlwindUntilTick
+                            whirling = tick < player.WhirlwindUntilTick,
+                            gems = player.Gems,
+                            nitroActive = tick < player.NitroUntilTick,
+                            megaBulletActive = tick < player.MegaBulletUntilTick,
+                            magnetActive = tick < player.MagnetUntilTick
                         }).ToArray();
                         recipients = players.Values.Where(player => player.Connection is not null).Select(player => player.Connection!).ToArray();
                         snapshot = new
@@ -432,7 +466,19 @@ public sealed class RealtimeMatchHub : IDisposable
                             elapsedSeconds = MathF.Min((float)matchElapsed.TotalSeconds, MatchDurationSeconds),
                             remainingSeconds = MathF.Max(0f, MatchDurationSeconds - (float)matchElapsed.TotalSeconds),
                             arenaBounds = new { halfWidth = arenaBounds.HalfWidth, halfHeight = arenaBounds.HalfHeight },
-                            winnerPlayerId
+                            winnerPlayerId,
+                            gems = gems.Where(gem => gem.Available).Select(gem => new
+                            {
+                                pickupId = gem.PickupId,
+                                position = new { x = gem.Position.X, y = gem.Position.Y },
+                                value = matchElapsed.TotalSeconds >= 60d ? 2 : 1
+                            }).ToArray(),
+                            powerUps = powerUps.Where(powerUp => powerUp.Available).Select(powerUp => new
+                            {
+                                pickupId = powerUp.PickupId,
+                                type = powerUp.Type,
+                                position = new { x = powerUp.Position.X, y = powerUp.Position.Y }
+                            }).ToArray()
                         };
                     }
                     if (snapshot is not null && recipients.Length > 0)
@@ -470,6 +516,7 @@ public sealed class RealtimeMatchHub : IDisposable
                 "HeavyDozer" => 0.8f,
                 _ => 1f
             };
+            if (tick < player.NitroUntilTick) speedMultiplier *= 1.5f;
             if (player.IsBot)
             {
                 var phase = tick * 0.015f + Math.Abs(player.PlayerId);
@@ -534,6 +581,7 @@ public sealed class RealtimeMatchHub : IDisposable
                     "HeavyDozer" => 10.8f / MassScale(player.Archetype),
                     _ => 6f / MassScale(player.Archetype)
                 };
+                if (tick < player.MegaBulletUntilTick) shotImpulse *= 1.8f;
                 player.Velocity -= player.Aim.Normalized * shotImpulse;
                 var cooldown = player.Archetype switch
                 {
@@ -575,8 +623,66 @@ public sealed class RealtimeMatchHub : IDisposable
                 var damage = tick < target.ShieldUntilTick ? 12f : 34f;
                 target.Health = MathF.Max(0f, target.Health - damage);
                 var targetMass = MassScale(target.Archetype);
-                target.Velocity += direction * ((tick < target.ShieldUntilTick ? 0.8f : 1.5f) / targetMass);
+                var targetImpulse = tick < target.ShieldUntilTick ? 0.8f : 1.5f;
+                if (tick < shooter.MegaBulletUntilTick) targetImpulse *= 1.8f;
+                target.Velocity += direction * (targetImpulse / targetMass);
                 if (target.Health <= 0f) Eliminate(target, shooter);
+            }
+        }
+
+        private void ResolvePickups(TimeSpan matchElapsed)
+        {
+            var elapsedSeconds = matchElapsed.TotalSeconds;
+            foreach (var powerUp in powerUps)
+            {
+                if (!powerUp.Available && elapsedSeconds >= powerUp.RespawnAtSeconds)
+                {
+                    powerUp.Available = true;
+                    powerUp.RespawnCount++;
+                    var desired = PowerUpRespawnPositions[(powerUp.PickupId - 1 + powerUp.RespawnCount) % PowerUpRespawnPositions.Length];
+                    var bounds = GetArenaBounds(matchElapsed);
+                    powerUp.Position = new WireVector(
+                        Math.Clamp(desired.X, -bounds.HalfWidth, bounds.HalfWidth),
+                        Math.Clamp(desired.Y, -bounds.HalfHeight, bounds.HalfHeight));
+                }
+            }
+
+            foreach (var gem in gems)
+            {
+                if (!gem.Available) continue;
+                RealtimePlayer? collector = null;
+                foreach (var player in players.Values)
+                {
+                    if (!player.Alive) continue;
+                    var radius = tick < player.MagnetUntilTick ? 4f : 0.55f;
+                    if ((player.Position - gem.Position).LengthSquared <= radius * radius)
+                    {
+                        collector = player;
+                        break;
+                    }
+                }
+                if (collector is null) continue;
+                collector.Gems += elapsedSeconds >= 60d ? 2 : 1;
+                gem.Available = false;
+            }
+
+            foreach (var powerUp in powerUps)
+            {
+                if (!powerUp.Available) continue;
+                foreach (var player in players.Values)
+                {
+                    if (!player.Alive || (player.Position - powerUp.Position).LengthSquared > 0.7f * 0.7f) continue;
+                    var activeUntil = tick + TickRate * 5;
+                    switch (powerUp.Type)
+                    {
+                        case "Nitro": player.NitroUntilTick = Math.Max(player.NitroUntilTick, activeUntil); break;
+                        case "MegaBullet": player.MegaBulletUntilTick = Math.Max(player.MegaBulletUntilTick, activeUntil); break;
+                        case "Magnet": player.MagnetUntilTick = Math.Max(player.MagnetUntilTick, activeUntil); break;
+                    }
+                    powerUp.Available = false;
+                    powerUp.RespawnAtSeconds = elapsedSeconds + 12d;
+                    break;
+                }
             }
         }
 
@@ -651,8 +757,9 @@ public sealed class RealtimeMatchHub : IDisposable
             if (matchElapsed.TotalSeconds >= MatchDurationSeconds)
             {
                 finished = true;
-                winnerPlayerId = alivePlayers.OrderByDescending(player => player.Health)
-                    .ThenByDescending(player => player.Eliminations).FirstOrDefault()?.PlayerId;
+                winnerPlayerId = alivePlayers.OrderByDescending(player => player.Gems)
+                    .ThenByDescending(player => player.Eliminations)
+                    .ThenByDescending(player => player.Health).FirstOrDefault()?.PlayerId;
             }
         }
 
@@ -700,6 +807,31 @@ public sealed class RealtimeMatchHub : IDisposable
             "HeavyDozer" => 1.5f,
             _ => 1f
         };
+
+        private static readonly WireVector[] PowerUpRespawnPositions =
+        {
+            new(-5f, 1f), new(0f, -4f), new(5f, 1f), new(0f, 4f), new(5f, -3.5f), new(-5f, -3.5f)
+        };
+
+        private sealed class RealtimeGemPickup
+        {
+            public RealtimeGemPickup(int pickupId, WireVector position) => (PickupId, Position) = (pickupId, position);
+            public int PickupId { get; }
+            public WireVector Position { get; }
+            public bool Available { get; set; } = true;
+        }
+
+        private sealed class RealtimePowerUpPickup
+        {
+            public RealtimePowerUpPickup(int pickupId, string type, WireVector position) =>
+                (PickupId, Type, Position) = (pickupId, type, position);
+            public int PickupId { get; }
+            public string Type { get; }
+            public WireVector Position { get; set; }
+            public bool Available { get; set; } = true;
+            public double RespawnAtSeconds { get; set; }
+            public int RespawnCount { get; set; }
+        }
 
         public void Dispose()
         {
@@ -750,6 +882,10 @@ public sealed class RealtimeMatchHub : IDisposable
         public int DashUntilTick { get; set; }
         public int LastBumpDamageTick { get; set; }
         public int FireBufferedUntilTick { get; set; } = -1;
+        public int Gems { get; set; }
+        public int NitroUntilTick { get; set; }
+        public int MegaBulletUntilTick { get; set; }
+        public int MagnetUntilTick { get; set; }
         public HashSet<int> WhirlwindHitPlayerIds { get; } = new();
         public int AbilityBufferedUntilTick { get; set; } = -1;
         public bool ShotPending { get; set; }

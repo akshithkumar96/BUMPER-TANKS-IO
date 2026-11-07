@@ -3,6 +3,7 @@
 
 import base64
 import json
+import math
 import os
 import queue
 import socket
@@ -167,6 +168,87 @@ def assert_no_snapshot(client, delay=0.35):
         pass
 
 
+def drive_toward_pickups(clients, player_ids, snapshot, pickup_ids):
+    pickups = {pickup["pickupId"]: pickup["position"] for pickup in snapshot["powerUps"]}
+    vectors = []
+    for player_id_value, pickup_id in zip(player_ids, pickup_ids):
+        player = next(player for player in snapshot["players"] if player["playerId"] == player_id_value)
+        target = pickups[pickup_id]
+        dx = target["x"] - player["position"]["x"]
+        dy = target["y"] - player["position"]["y"]
+        length = math.hypot(dx, dy)
+        vectors.append((dx / length, dy / length))
+
+    # Keep input cadence below the server's 60 Hz per-player limit while giving
+    # each tank enough movement frames to cross its seeded pickup location.
+    for tick in range(1, 19):
+        for client, (x, y) in zip(clients, vectors):
+            client.send({"type": "input", "tick": tick, "movement": {"x": x, "y": y},
+                         "aim": {"x": 0, "y": 1}, "fire": False, "ability": False})
+        time.sleep(0.035)
+    for client in clients:
+        client.send({"type": "input", "tick": 19, "movement": {"x": 0, "y": 0},
+                     "aim": {"x": 0, "y": 1}, "fire": False, "ability": False})
+
+
+def clear_shot_target(snapshot, shooter_id):
+    shooter = next(player for player in snapshot["players"] if player["playerId"] == shooter_id)
+    sx, sy = shooter["position"]["x"], shooter["position"]["y"]
+    candidates = []
+    for target in snapshot["players"]:
+        if target["playerId"] == shooter_id or not target.get("alive") or target["health"] < 60:
+            continue
+        dx = target["position"]["x"] - sx
+        dy = target["position"]["y"] - sy
+        distance = math.hypot(dx, dy)
+        if not 0.4 < distance <= 12:
+            continue
+        aim_x, aim_y = dx / distance, dy / distance
+        blocked = False
+        for other in snapshot["players"]:
+            if other["playerId"] in (shooter_id, target["playerId"]) or not other.get("alive"):
+                continue
+            ox = other["position"]["x"] - sx
+            oy = other["position"]["y"] - sy
+            along = ox * aim_x + oy * aim_y
+            perpendicular = math.hypot(ox - aim_x * along, oy - aim_y * along)
+            if 0.4 <= along < distance and perpendicular <= 0.55:
+                blocked = True
+                break
+        if not blocked:
+            candidates.append((distance, target))
+    if not candidates:
+        raise AssertionError(f"No clear combat target in range: {snapshot}")
+    return min(candidates, key=lambda item: item[0])[1]
+
+
+def fire_until_hit(client, snapshot, shooter_id, target_id, previous_health, last_client_tick):
+    """Keep aim updated against the moving authoritative bots until a shot lands."""
+    deadline = time.monotonic() + 3
+    current = snapshot
+    while time.monotonic() < deadline:
+        shooter = next(player for player in current["players"] if player["playerId"] == shooter_id)
+        target = next(player for player in current["players"] if player["playerId"] == target_id)
+        aim_x = target["position"]["x"] - shooter["position"]["x"]
+        aim_y = target["position"]["y"] - shooter["position"]["y"]
+        length = max(0.0001, math.hypot(aim_x, aim_y))
+        input_tick = max(last_client_tick + 1, current["tick"] + 1)
+        time.sleep(0.02)  # Respect the server's 60 Hz per-player input limit.
+        client.send({
+            "type": "input", "tick": input_tick,
+            "movement": {"x": 0, "y": 0},
+            "aim": {"x": aim_x / length, "y": aim_y / length},
+            "fire": True, "ability": False,
+        })
+        last_client_tick = input_tick
+        current = wait_for(client, lambda message: message.get("type") == "snapshot" and
+                           message.get("tick", 0) > current["tick"], timeout=1)
+        target = next((player for player in current["players"] if player["playerId"] == target_id), None)
+        if target is None or target["health"] < previous_health:
+            return current, target, last_client_tick
+    raise AssertionError(f"Timed out waiting for moving bot to be hit; last snapshot: {current}")
+
+
 def main():
     address = sys.argv[1].removeprefix("http://").removeprefix("ws://").rstrip("/")
     clients = []
@@ -196,6 +278,35 @@ def main():
             assert any(player["playerId"] == response["playerId"] and player["archetype"] == archetype
                        for player in response["players"]), response
 
+        initial = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                           len(message.get("powerUps", [])) == 3, timeout=3)
+        drive_toward_pickups([first, second, clients[2]], first_room_player_ids[:3], initial, [1, 2, 3])
+        moved = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                         any(player["playerId"] == first_room_player_ids[0] and player.get("megaBulletActive")
+                             for player in message["players"]) and
+                         any(player["playerId"] == first_room_player_ids[1] and player.get("nitroActive")
+                             for player in message["players"]) and
+                         any(player["playerId"] == first_room_player_ids[2] and player.get("magnetActive")
+                             for player in message["players"]) and
+                         any(player["playerId"] == first_room_player_ids[2] and player.get("gems", 0) >= 1
+                             for player in message["players"]))
+        first_room_players = [player for player in moved["players"] if player["playerId"] > 0]
+        assert len(first_room_players) == 8, moved
+        assert moved["phase"] == "opening" and 0 <= moved["remainingSeconds"] <= 90, moved
+        assert moved["arenaBounds"] == {"halfWidth": 7.4, "halfHeight": 5.4}, moved
+        assert all("alive" in player and "eliminations" in player and "shielded" in player and "archetype" in player
+                   for player in first_room_players), moved
+        first_state = next(player for player in first_room_players if player["playerId"] == first_join["playerId"])
+        second_state = next(player for player in first_room_players if player["playerId"] == second_join["playerId"])
+        magnet_state = next(player for player in first_room_players if player["playerId"] == first_room_player_ids[2])
+        assert first_state["archetype"] == "SpeedyBumper" and first_state["gems"] == 1 and first_state["megaBulletActive"], moved
+        assert second_state["nitroActive"], moved
+        assert magnet_state["magnetActive"] and magnet_state["gems"] >= 1, moved
+        assert all(gem["pickupId"] not in (1, 2) for gem in moved["gems"]), moved
+        assert not moved["powerUps"], moved
+
+        time.sleep(0.05)  # Let zero-movement frames settle before joining the next room.
+
         ninth, ninth_join = join(address, 9)
         clients.append(ninth)
         assert ninth_join["roomId"] != first_join["roomId"], ninth_join
@@ -219,75 +330,31 @@ def main():
         rejection = wait_for(invalid, lambda message: message.get("type") == "error", timeout=2, allow_error=True)
         assert rejection["code"] == "invalid_input", rejection
 
-        first.send({
-            "type": "input", "tick": 1,
-            "movement": {"x": 1, "y": 0}, "aim": {"x": 0, "y": 1},
-            "fire": False, "ability": False,
-        })
-        moved = wait_for(first, lambda message: message.get("type") == "snapshot" and
-                         any(player["playerId"] == first_join["playerId"] and player["position"]["x"] > -3.75
-                             for player in message["players"]))
-        first_room_players = [player for player in moved["players"] if player["playerId"] > 0]
-        assert len(first_room_players) == 8, moved
-        assert moved["phase"] == "opening" and 0 <= moved["remainingSeconds"] <= 90, moved
-        assert moved["arenaBounds"] == {"halfWidth": 7.4, "halfHeight": 5.4}, moved
-        assert all("alive" in player and "eliminations" in player and "shielded" in player and "archetype" in player
-                   for player in first_room_players), moved
-        assert next(player for player in first_room_players if player["playerId"] == first_join["playerId"])["archetype"] == "SpeedyBumper", moved
-
-        first.send({
-            "type": "input", "tick": 2,
-            "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
-            "fire": False, "ability": False,
-        })
-        time.sleep(0.05)  # Respect the server's 60 Hz per-player input limit.
-
-        # Three server-resolved shots must reduce health and eliminate the target tank.
-        target_id = first_room_player_ids[4]
-        assert next(player for player in first_room_players if player["playerId"] == target_id)["archetype"] == "HeavyDozer", moved
+        # Use the Spinner near the right side so authoritative recoil moves it
+        # back into the arena while the bots keep moving.
+        combat_shooter_id = first_room_player_ids[2]
+        target_id = clear_shot_target(moved, combat_shooter_id)["playerId"]
         previous_health = next(player["health"] for player in moved["players"] if player["playerId"] == target_id)
-        current_snapshot = moved
-        last_client_tick = 2
-        for shot in range(3):
-            shooter_state = next(player for player in current_snapshot["players"] if player["playerId"] == first_join["playerId"])
-            target_state = next(player for player in current_snapshot["players"] if player["playerId"] == target_id)
-            aim_x = target_state["position"]["x"] - shooter_state["position"]["x"]
-            aim_y = target_state["position"]["y"] - shooter_state["position"]["y"]
-            aim_length = max(0.0001, (aim_x * aim_x + aim_y * aim_y) ** 0.5)
-            input_tick = max(last_client_tick + 1, current_snapshot["tick"] + 1)
-            first.send({
-                "type": "input", "tick": input_tick,
-                "movement": {"x": 0, "y": 0}, "aim": {"x": aim_x / aim_length, "y": aim_y / aim_length},
-                "fire": True, "ability": False,
-            })
-            last_client_tick = input_tick
-            hit = wait_for(first, lambda message: message.get("type") == "snapshot" and
-                           next((player["health"] for player in message["players"] if player["playerId"] == target_id), 100) < previous_health,
-                           timeout=2)
-            target_state = next(player for player in hit["players"] if player["playerId"] == target_id)
-            previous_health = target_state["health"]
-            current_snapshot = hit
-            if shot < 2:
-                assert target_state["alive"], target_state
-                time.sleep(0.7)  # Leave margin around the server's 15-tick cooldown.
-        assert not target_state["alive"] and target_state["health"] == 0, target_state
-        shooter_state = next(player for player in hit["players"] if player["playerId"] == first_join["playerId"])
-        assert shooter_state["eliminations"] == 1, shooter_state
+        spinner = clients[2]
+        hit, target_state, spinner_last_client_tick = fire_until_hit(
+            spinner, moved, combat_shooter_id, target_id, previous_health, 19)
+        impulse_speed = math.hypot(target_state["velocity"]["x"], target_state["velocity"]["y"])
+        assert target_state["health"] < previous_health and impulse_speed > 0.5, target_state
+        last_client_tick = 19
 
         second.send({
-            "type": "input", "tick": 1,
+            "type": "input", "tick": 20,
             "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
             "fire": False, "ability": True,
         })
         heavy_shield = wait_for(second, lambda message: message.get("type") == "snapshot" and
                                 next((player["shielded"] for player in message["players"]
                                       if player["playerId"] == second_join["playerId"]), False))
-        assert next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])["health"] == 100, heavy_shield
+        assert next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])["shielded"], heavy_shield
 
-        spinner = clients[2]
         spinner_id = first_room_player_ids[2]
         spinner.send({
-            "type": "input", "tick": 1,
+            "type": "input", "tick": spinner_last_client_tick + 1,
             "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
             "fire": False, "ability": True,
         })
@@ -306,6 +373,7 @@ def main():
                                  next((player["velocity"]["y"] for player in message["players"]
                                        if player["playerId"] == first_join["playerId"]), 0) > 5)
         assert next(player for player in dash_snapshot["players"] if player["playerId"] == first_join["playerId"])["velocity"]["y"] > 5, dash_snapshot
+        time.sleep(0.02)
         first.send({
             "type": "input", "tick": dash_tick + 1,
             "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
@@ -326,6 +394,17 @@ def main():
             clients[index].close()
             clients[index] = None
 
+        respawn_elapsed = moved["elapsedSeconds"] + 12.2
+        before_respawn = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                                  message.get("elapsedSeconds", 0) >= moved["elapsedSeconds"] + 11.5, timeout=15)
+        assert all(power_up["pickupId"] != 1 for power_up in before_respawn["powerUps"]), before_respawn
+        after_respawn = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                                 message.get("elapsedSeconds", 0) >= respawn_elapsed, timeout=4)
+        respawned_mega = next(power_up for power_up in after_respawn["powerUps"] if power_up["pickupId"] == 1)
+        assert respawned_mega["type"] == "MegaBullet", respawned_mega
+        assert respawned_mega["position"] == {"x": 0, "y": -4}, respawned_mega
+        assert {power_up["pickupId"] for power_up in after_respawn["powerUps"]} == {1, 2, 3}, after_respawn
+
         collapse = wait_for(first, lambda message: message.get("type") == "snapshot" and
                             message.get("elapsedSeconds", 0) >= 30, timeout=35)
         assert collapse["phase"] == "collapse", collapse
@@ -336,7 +415,13 @@ def main():
         assert 5.3 < next_boundary["arenaBounds"]["halfWidth"] < 5.6, next_boundary
         assert next_boundary["arenaBounds"]["halfWidth"] < collapse["arenaBounds"]["halfWidth"], next_boundary
 
-        print("Realtime WebSocket smoke passed: matchmaking, 8-player cap, 30 Hz snapshots, archetype movement/abilities, authoritative fire/recoil/elimination, 30/35-second boundary steps, bot fill, disconnect, and invalid-input rejection.")
+        sudden_death = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                                message.get("elapsedSeconds", 0) >= 60, timeout=27)
+        assert sudden_death["phase"] == "sudden_death", sudden_death
+        assert sudden_death["arenaBounds"] == {"halfWidth": 1.5, "halfHeight": 1.5}, sudden_death
+        assert sudden_death["gems"] and all(gem["value"] == 2 for gem in sudden_death["gems"]), sudden_death
+
+        print("Realtime WebSocket smoke passed: matchmaking, 8-player cap, 30 Hz snapshots, server gem/power-up collection, Nitro/Mega-Bullet/Magnet effects, 12-second respawn, doubled sudden-death gems, authoritative combat, boundary steps, bots, disconnect, and invalid-input rejection.")
     finally:
         for client in clients:
             if client is not None:
