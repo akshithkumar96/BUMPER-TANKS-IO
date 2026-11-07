@@ -8,6 +8,7 @@
     "com.unity.modules.physics2d": "1.0.0",
     "com.unity.modules.unitywebrequest": "1.0.0",
     "com.unity.modules.uielements": "1.0.0",
-    "com.unity.render-pipelines.universal": "17.3.0"
+    "com.unity.render-pipelines.universal": "17.3.0",
+    "com.unity.services.levelplay": "9.6.0"
   }
 }

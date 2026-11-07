@@ -18,6 +18,9 @@ namespace BumperTanks.Frontend
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
             DontDestroyOnLoad(gameObject);
+#if UNITY_ANDROID || UNITY_IOS
+            if (GetComponent<LevelPlayRewardedSpinService>() == null) gameObject.AddComponent<LevelPlayRewardedSpinService>();
+#endif
             StartCoroutine(InitializeIdentity());
         }
 
@@ -79,6 +82,51 @@ namespace BumperTanks.Frontend
                 if (result?.profile != null) SetServerProfile(result.profile);
                 onSuccess?.Invoke(result != null ? result.award : 0);
             }, onError));
+        }
+
+        public bool CanWatchAdBonusSpin => LevelPlayRewardedSpinService.IsConfigured;
+
+        public void WatchAdBonusSpin(Action<int> onSuccess, Action<string> onError)
+        {
+            StartCoroutine(CreateAdSpinChallenge(challenge => LevelPlayRewardedSpinService.Instance.Show(challenge, onSuccess, onError), onError));
+        }
+
+        private IEnumerator CreateAdSpinChallenge(Action<string> onSuccess, Action<string> onError)
+        {
+            var requestBody = JsonUtility.ToJson(new DailyReward(ProfileStore.GetServerPlayerId()));
+            yield return PostJsonResponse("/v1/rewards/ad/challenge", requestBody, response =>
+            {
+                var challenge = JsonUtility.FromJson<AdSpinChallengeResponse>(response);
+                if (challenge == null || string.IsNullOrEmpty(challenge.challengeId)) onError?.Invoke("Invalid ad challenge response.");
+                else onSuccess?.Invoke(challenge.challengeId);
+            }, onError);
+        }
+
+        public void PollAdSpinStatus(string challengeId, Action<int> onComplete, Action<string> onError = null)
+        {
+            StartCoroutine(PollAdSpin(challengeId, onComplete, onError));
+        }
+
+        private IEnumerator PollAdSpin(string challengeId, Action<int> onComplete, Action<string> onError)
+        {
+            var deadline = Time.realtimeSinceStartup + 90f;
+            while (Time.realtimeSinceStartup < deadline)
+            {
+                var done = false;
+                yield return GetJson("/v1/rewards/ad/status/" + challengeId, response =>
+                {
+                    var status = JsonUtility.FromJson<AdSpinStatusResponse>(response);
+                    if (status != null && status.completed)
+                    {
+                        if (status.profile != null) SetServerProfile(status.profile);
+                        onComplete?.Invoke(status.award);
+                        done = true;
+                    }
+                }, error => { onError?.Invoke(error); done = true; });
+                if (done) yield break;
+                yield return new WaitForSecondsRealtime(2f);
+            }
+            onError?.Invoke("Reward verification is still pending. Reopen the garage to check again.");
         }
 
         public void Track(string playerId, string eventName)
@@ -190,6 +238,9 @@ namespace BumperTanks.Frontend
 
         [Serializable]
         private sealed class DailyRewardResponse { public ServerProfile profile; public int award; }
+
+        [Serializable] private sealed class AdSpinChallengeResponse { public string challengeId; }
+        [Serializable] private sealed class AdSpinStatusResponse { public bool completed; public int award; public ServerProfile profile; }
 
         [Serializable]
         public sealed class ServerProfile { public int battleCoins; public string[] ownedCosmetics; }

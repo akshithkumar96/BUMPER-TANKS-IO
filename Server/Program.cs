@@ -66,6 +66,56 @@ app.MapPost("/v1/rewards/daily", (DailyRewardRequest request, HttpRequest httpRe
     return Results.Ok(new DailyRewardResponse(updated, reward));
 }).RequireRateLimiting("rewards");
 
+app.MapPost("/v1/rewards/ad/challenge", (DailyRewardRequest request, HttpRequest httpRequest) =>
+{
+    if (!TryGetAuthenticatedPlayer(identities, httpRequest, out var authenticatedPlayerId)) return Results.Unauthorized();
+    if (request.PlayerId != authenticatedPlayerId) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!RequestValidation.IsPlayerId(request.PlayerId)) return Results.BadRequest(new { error = "invalid playerId" });
+    if (string.IsNullOrWhiteSpace(builder.Configuration["Rewards:LevelPlayPrivateKey"])) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    try
+    {
+        var challenge = profiles.CreateAdSpinChallenge(request.PlayerId, DateOnly.FromDateTime(DateTime.UtcNow));
+        return Results.Ok(new AdSpinChallengeResponse(challenge.ChallengeId, challenge.ExpiresUtc));
+    }
+    catch (InvalidOperationException) { return Results.Conflict(new { error = "bonus spin already claimed today" }); }
+}).RequireRateLimiting("rewards");
+
+app.MapGet("/v1/rewards/ad/status/{challengeId}", (string challengeId, HttpRequest httpRequest) =>
+{
+    if (!TryGetAuthenticatedPlayer(identities, httpRequest, out var authenticatedPlayerId)) return Results.Unauthorized();
+    var challenge = profiles.GetAdSpinChallenge(challengeId, authenticatedPlayerId);
+    if (challenge == null) return Results.NotFound();
+    var profile = challenge.Completed ? profiles.GetOrCreate(authenticatedPlayerId) : null;
+    return Results.Ok(new AdSpinStatusResponse(challenge.Completed, challenge.Award, profile));
+}).RequireRateLimiting("rewards");
+
+app.MapGet("/v1/rewards/ad/levelplay-callback", (HttpRequest request) =>
+{
+    var key = builder.Configuration["Rewards:LevelPlayPrivateKey"];
+    if (string.IsNullOrWhiteSpace(key)) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    var query = request.Query;
+    string Pick(params string[] names) => names.Select(name => query[name].FirstOrDefault()).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+    var userId = Pick("userId", "USER_ID", "appUserId", "applicationUserId", "userid");
+    var eventId = Pick("eventId", "EVENT_ID");
+    var rewards = Pick("rewards", "REWARDS", "rewardAmount");
+    var timestamp = Pick("timestamp", "TIMESTAMP");
+    var signature = Pick("signature", "SIGNATURE");
+    var challengeId = Pick("challengeId", "custom_challengeId", "customParams", "CUSTOM_PARAMS");
+    if (challengeId.StartsWith("challengeId=", StringComparison.Ordinal)) challengeId = challengeId[12..];
+    if (!RequestValidation.IsPlayerId(userId) || eventId.Length is 0 or > 128 || !int.TryParse(rewards, out var rewardUnits) || rewardUnits <= 0 || timestamp.Length == 0 || challengeId.Length != 32)
+        return Results.BadRequest("invalid callback parameters");
+    if (!DateTimeOffset.TryParseExact(timestamp, "yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture,
+        System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var callbackAt))
+        return Results.BadRequest("invalid timestamp");
+    var callbackAge = DateTimeOffset.UtcNow - callbackAt;
+    if (callbackAge < TimeSpan.FromMinutes(-5) || callbackAge > TimeSpan.FromDays(8)) return Results.BadRequest("expired callback");
+    var expected = Convert.ToHexString(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(timestamp + eventId + userId + rewards + key))).ToLowerInvariant();
+    if (signature.Length != expected.Length || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.ASCII.GetBytes(signature.ToLowerInvariant()), System.Text.Encoding.ASCII.GetBytes(expected)))
+        return Results.Unauthorized();
+    if (!profiles.TryCompleteAdSpin(challengeId, eventId, userId, callbackAt, out _, out _, out _)) return Results.Conflict("invalid or consumed challenge");
+    return Results.Text(eventId + ":OK");
+}).RequireRateLimiting("rewards");
+
 app.MapGet("/v1/cosmetics", () => Results.Ok(new CosmeticCatalogResponse(CosmeticCatalog.All.ToArray())));
 
 app.MapPost("/v1/cosmetics/purchase", (CosmeticPurchaseRequest request, HttpRequest httpRequest) =>
@@ -127,6 +177,8 @@ public sealed record PlayerProfile(string PlayerId, int BattleCoins, int Matches
 }
 public sealed record DailyRewardRequest(string PlayerId);
 public sealed record DailyRewardResponse(PlayerProfile Profile, int Award);
+public sealed record AdSpinChallengeResponse(string ChallengeId, DateTimeOffset ExpiresUtc);
+public sealed record AdSpinStatusResponse(bool Completed, int Award, PlayerProfile? Profile);
 public sealed record CosmeticPurchaseRequest(string PlayerId, string CosmeticId);
 public sealed record CosmeticPurchaseResponse(PlayerProfile Profile, string CosmeticId);
 public sealed record CosmeticCatalogResponse(CosmeticDefinition[] Items);

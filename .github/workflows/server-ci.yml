@@ -22,6 +22,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: dotnet build BumperTanks.Server.csproj --configuration Release
+      - run: dotnet build ../Tests/AdRewardRepositorySmoke/AdRewardRepositorySmoke.csproj --configuration Release
       - name: Start service and verify health and rewards
         run: |
           set -euo pipefail
@@ -31,6 +32,7 @@ jobs:
           export ASPNETCORE_ENVIRONMENT=Production
           export Rewards__RequireMatchAttestation=true
           export Rewards__MatchAttestationSecret=ci-only-match-attestation-secret-32-bytes-minimum
+          export Rewards__LevelPlayPrivateKey=ci-only-levelplay-reward-signing-key
           dotnet run --no-build --configuration Release --urls http://127.0.0.1:5188 &
           service_pid=$!
           trap 'kill "$service_pid" 2>/dev/null || true' EXIT
@@ -38,6 +40,7 @@ jobs:
           for i in {1..10}; do if curl --fail --silent http://127.0.0.1:5188/health; then healthy=true; break; fi; sleep 1; done
           test "$healthy" = true
           python3 realtime_smoke.py http://127.0.0.1:5188
+          python3 ad_reward_smoke.py http://127.0.0.1:5188
           identity=$(curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/identity/anonymous)
           player_id=$(echo "$identity" | jq -r '.playerId')
           player_token=$(echo "$identity" | jq -r '.accessToken')

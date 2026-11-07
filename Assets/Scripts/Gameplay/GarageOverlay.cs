@@ -81,6 +81,11 @@ namespace BumperTanks.Gameplay
                 GUI.Label(SafeFrame(left + 10, top + 38, controlWidth, 22, safe), "Daily spin: 25, 50, 75, or 100 coins");
                 GUI.enabled = !dailyRewardPending;
                 if (GUI.Button(SafeFrame(left + 10, top + 66, controlWidth, 44, safe), dailyRewardPending ? "Spinning..." : "Spin daily reward")) RequestDailyReward();
+                if (GameServiceClient.Instance != null && GameServiceClient.Instance.CanWatchAdBonusSpin)
+                {
+                    GUI.enabled = !dailyRewardPending;
+                    if (GUI.Button(SafeFrame(left + 10, top + 166, controlWidth, 44, safe), dailyRewardPending ? "Verifying..." : "Watch video for bonus spin")) RequestAdBonusSpin();
+                }
                 GUI.enabled = true;
                 if (!string.IsNullOrEmpty(dailyRewardMessage)) GUI.Label(SafeFrame(left + 10, top + 118, controlWidth, 38, safe), dailyRewardMessage);
             }
@@ -118,6 +123,8 @@ namespace BumperTanks.Gameplay
             else
             {
                 actions.Add(new AccessibleUiAction(dailyRewardPending ? "Daily reward is spinning" : "Spin daily reward", "Available once each day. The reward is added to your Battle Coins.", SafeFrame(left + 10, top + 66, width, 44, safe), RequestDailyReward));
+                if (GameServiceClient.Instance != null && GameServiceClient.Instance.CanWatchAdBonusSpin)
+                    actions.Add(new AccessibleUiAction(dailyRewardPending ? "Rewarded video pending" : "Watch a video for a bonus spin", "Coins are added only after the server verifies the ad network callback.", SafeFrame(left + 10, top + 166, width, 44, safe), RequestAdBonusSpin));
             }
             actions.Add(new AccessibleUiAction("Previous garage page", "Show the previous garage category.", SafeFrame(left + 10, top + 332, 44, 44, safe), PreviousPage));
             actions.Add(new AccessibleUiAction("Back to main menu", "Close the garage and return to the main menu.", SafeFrame(left + 64, top + 332, 90, 44, safe), ReturnToMenu));
@@ -296,6 +303,30 @@ namespace BumperTanks.Gameplay
             {
                 dailyRewardPending = false;
                 dailyRewardMessage = "Unavailable. Try again later.";
+                AccessibleUiBridge.Instance?.Announce(dailyRewardMessage);
+                ShowAccessibleScreen();
+            });
+        }
+
+        private void RequestAdBonusSpin()
+        {
+            if (dailyRewardPending) return;
+            var client = GameServiceClient.Instance;
+            if (client == null) { dailyRewardMessage = "Service unavailable."; return; }
+            dailyRewardPending = true;
+            dailyRewardMessage = "Preparing secure ad reward...";
+            ShowAccessibleScreen();
+            client.WatchAdBonusSpin(reward =>
+            {
+                profile = ProfileStore.Load();
+                dailyRewardPending = false;
+                dailyRewardMessage = $"Verified! Won {reward} Battle Coins.";
+                AccessibleUiBridge.Instance?.Announce(dailyRewardMessage);
+                ShowAccessibleScreen();
+            }, error =>
+            {
+                dailyRewardPending = false;
+                dailyRewardMessage = error;
                 AccessibleUiBridge.Instance?.Announce(dailyRewardMessage);
                 ShowAccessibleScreen();
             });

@@ -5,6 +5,8 @@ public sealed class ProfileRepository
 {
     private readonly ConcurrentDictionary<string, PlayerProfile> profiles;
     private readonly HashSet<string> completedMatches = new();
+    private readonly Dictionary<string, AdSpinChallenge> adSpinChallenges = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RewardedAdEvent> rewardedAdEvents = new(StringComparer.Ordinal);
     private readonly string path;
     private readonly Lock writeLock = new();
 
@@ -16,12 +18,70 @@ public sealed class ProfileRepository
             var snapshot = JsonSerializer.Deserialize<ProfileSnapshot>(File.ReadAllText(path)) ?? new ProfileSnapshot();
             profiles = new ConcurrentDictionary<string, PlayerProfile>(snapshot.Profiles);
             completedMatches.UnionWith(snapshot.CompletedMatches);
+            foreach (var challenge in snapshot.AdSpinChallenges ?? new()) adSpinChallenges[challenge.ChallengeId] = challenge;
+            foreach (var (eventId, binding) in snapshot.RewardedAdEvents ?? new()) rewardedAdEvents[eventId] = binding;
         }
         else profiles = new ConcurrentDictionary<string, PlayerProfile>();
     }
 
     public PlayerProfile GetOrCreate(string playerId) => profiles.GetOrAdd(playerId, static id => new PlayerProfile(id, 0, 0, DateOnly.MinValue));
     public IEnumerable<PlayerProfile> All => profiles.Values;
+
+    public AdSpinChallenge CreateAdSpinChallenge(string playerId, DateOnly today)
+    {
+        lock (writeLock)
+        {
+            var existing = adSpinChallenges.Values.FirstOrDefault(item => item.PlayerId == playerId && item.ExpiresUtc > DateTimeOffset.UtcNow && !item.Completed);
+            if (existing != null) return existing;
+            if (adSpinChallenges.Values.Any(item => item.PlayerId == playerId && item.Day == today && item.Completed))
+                throw new InvalidOperationException("bonus spin already claimed today");
+            var createdUtc = DateTimeOffset.UtcNow;
+            var challenge = new AdSpinChallenge(Guid.NewGuid().ToString("N"), playerId, today, createdUtc, createdUtc.AddDays(9), false, 0, string.Empty, string.Empty);
+            adSpinChallenges[challenge.ChallengeId] = challenge;
+            try { PersistLocked(); }
+            catch { adSpinChallenges.Remove(challenge.ChallengeId); throw; }
+            return challenge;
+        }
+    }
+
+    public bool TryCompleteAdSpin(string challengeId, string eventId, string playerId, DateTimeOffset callbackAt, out PlayerProfile updated, out int award, out bool duplicate)
+    {
+        lock (writeLock)
+        {
+            duplicate = rewardedAdEvents.TryGetValue(eventId, out var binding);
+            var challenge = adSpinChallenges.GetValueOrDefault(challengeId);
+            var hasCurrentProfile = profiles.TryGetValue(playerId, out var current);
+            current ??= new PlayerProfile(playerId, 0, 0, DateOnly.MinValue);
+            if (duplicate && binding == new RewardedAdEvent(playerId, challengeId) && challenge is { Completed: true } && challenge.PlayerId == playerId)
+            {
+                updated = current; award = challenge.Award; return true;
+            }
+            if (duplicate) { updated = current; award = 0; return false; }
+            updated = current; award = 0;
+            if (challenge == null || challenge.Completed || challenge.PlayerId != playerId || challenge.ExpiresUtc < DateTimeOffset.UtcNow || callbackAt < challenge.CreatedUtc.AddMinutes(-1) || callbackAt > challenge.ExpiresUtc) return false;
+            award = new[] { 25, 50, 75, 100 }[Random.Shared.Next(4)];
+            updated = updated with { BattleCoins = (int)Math.Min(int.MaxValue, (long)updated.BattleCoins + award) };
+            var previousProfile = hasCurrentProfile ? current : null;
+            var completed = challenge with { Day = DateOnly.FromDateTime(callbackAt.UtcDateTime), Completed = true, Award = award, EventId = eventId, Timestamp = callbackAt.ToString("yyyyMMddHHmm") };
+            profiles[playerId] = updated;
+            rewardedAdEvents[eventId] = new RewardedAdEvent(playerId, challengeId);
+            adSpinChallenges[challengeId] = completed;
+            try { PersistLocked(); }
+            catch
+            {
+                if (previousProfile == null) profiles.TryRemove(playerId, out _); else profiles[playerId] = previousProfile;
+                rewardedAdEvents.Remove(eventId);
+                adSpinChallenges[challengeId] = challenge;
+                throw;
+            }
+            return true;
+        }
+    }
+
+    public AdSpinChallenge? GetAdSpinChallenge(string challengeId, string playerId)
+    {
+        lock (writeLock) return adSpinChallenges.TryGetValue(challengeId, out var challenge) && challenge.PlayerId == playerId ? challenge : null;
+    }
 
     public void Save(PlayerProfile profile)
     {
@@ -116,7 +176,9 @@ public sealed class ProfileRepository
         File.WriteAllText(temporary, JsonSerializer.Serialize(new ProfileSnapshot
         {
             Profiles = profiles.ToDictionary(pair => pair.Key, pair => pair.Value),
-            CompletedMatches = completedMatches
+            CompletedMatches = completedMatches,
+            AdSpinChallenges = adSpinChallenges.Values.ToList(),
+            RewardedAdEvents = rewardedAdEvents
         }));
         File.Move(temporary, path, true);
     }
@@ -126,4 +188,9 @@ public sealed class ProfileSnapshot
 {
     public Dictionary<string, PlayerProfile> Profiles { get; set; } = new();
     public HashSet<string> CompletedMatches { get; set; } = new();
+    public List<AdSpinChallenge>? AdSpinChallenges { get; set; } = new();
+    public Dictionary<string, RewardedAdEvent>? RewardedAdEvents { get; set; } = new(StringComparer.Ordinal);
 }
+
+public sealed record AdSpinChallenge(string ChallengeId, string PlayerId, DateOnly Day, DateTimeOffset CreatedUtc, DateTimeOffset ExpiresUtc, bool Completed, int Award, string EventId, string Timestamp);
+public sealed record RewardedAdEvent(string PlayerId, string ChallengeId);
