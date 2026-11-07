@@ -113,6 +113,12 @@ Bumper Tanks IO - Game Design Document.pdf
 # .NET build output for the standalone game service
 /Server/bin/
 /Server/obj/
+/Tests/**/bin/
+/Tests/**/obj/
+Server/__pycache__/
+
+# LevelPlay generates these dependency catalogs in the project Assets folder.
+/Assets/LevelPlay/
 
 # Standalone ASP.NET service project (Unity's global rule ignores all csproj files)
 !/Server/BumperTanks.Server.csproj
