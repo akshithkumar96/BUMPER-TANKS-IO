@@ -1,7 +1,7 @@
 {
   "name": "BumperTanks.Network.Tests",
   "rootNamespace": "BumperTanks.Network.Tests",
-  "references": ["BumperTanks.Network", "BumperTanks.Match"],
+  "references": ["BumperTanks.Network", "BumperTanks.Match", "BumperTanks.Frontend"],
   "includePlatforms": ["Editor"],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

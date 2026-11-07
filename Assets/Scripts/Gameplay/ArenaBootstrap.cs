@@ -107,20 +107,26 @@ namespace BumperTanks.Gameplay
             var safe = GuiSafeAreaLayout.Current;
             if (showFrontMenu)
             {
-                var panel = GuiSafeAreaLayout.Centered(340f, 240f, safe);
+                var panel = GuiSafeAreaLayout.Centered(340f, 300f, safe);
                 GUI.Box(panel, "BUMPER TANKS IO");
                 GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 140f, panel.y + 45f, 280f, 25f), safe), "Top down arena brawler");
-                if (GUI.Button(MenuFrame(panel, -115f, -30f, 230f, 40f), "Play Arena"))
+                if (GUI.Button(MenuFrame(panel, -115f, -70f, 230f, 40f), "Play Arena"))
                     BeginArena();
-                if (GUI.Button(MenuFrame(panel, -115f, 20f, 110f, 34f), "Garage (G)"))
+                if (GUI.Button(MenuFrame(panel, -115f, -20f, 110f, 34f), "Garage (G)"))
                 {
                     OpenGarageFromMenu();
                 }
-                if (GUI.Button(MenuFrame(panel, 5f, 20f, 110f, 34f), "Scores (L)"))
+                if (GUI.Button(MenuFrame(panel, 5f, -20f, 110f, 34f), "Scores (L)"))
                 {
                     OpenLeaderboardFromMenu();
                 }
-                GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 140f, panel.y + 188f, 280f, 24f), safe), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
+                var telemetryStatus = !TelemetryConsentSettings.HasChoice
+                    ? "Optional: share gameplay activity from this profile to improve balance."
+                    : $"Gameplay activity sharing: {(TelemetryConsentSettings.IsAllowed ? "On" : "Off")}. Change any time.";
+                GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 145f, panel.center.y + 25f, 290f, 30f), safe), telemetryStatus);
+                if (GUI.Button(MenuFrame(panel, -115f, 62f, 110f, 36f), "Allow")) SetTelemetryConsent(true);
+                if (GUI.Button(MenuFrame(panel, 5f, 62f, 110f, 36f), "No thanks")) SetTelemetryConsent(false);
+                GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 140f, panel.y + 268f, 280f, 24f), safe), $"Battle Coins: {ProfileStore.Load().BattleCoins}");
                 return;
             }
             GUI.Box(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 4f, safe.y + 4f, 345, 92), safe), onlineMatch ? "BUMPER TANKS IO - Online Arena" : "BUMPER TANKS IO - Offline Arena");
@@ -213,6 +219,13 @@ namespace BumperTanks.Gameplay
             SendMessage("OpenLeaderboard", SendMessageOptions.DontRequireReceiver);
         }
 
+        private void SetTelemetryConsent(bool allowed)
+        {
+            TelemetryConsentSettings.SetAllowed(allowed);
+            accessibleUi?.Announce(allowed ? "Anonymous gameplay sharing enabled." : "Anonymous gameplay sharing disabled.");
+            ShowMainMenuAccessibility();
+        }
+
         private void OpenGarageFromMatch()
         {
             Time.timeScale = 0f;
@@ -235,12 +248,18 @@ namespace BumperTanks.Gameplay
 
         private void ShowMainMenuAccessibility()
         {
-            var panel = GuiSafeAreaLayout.Centered(340f, 240f, GuiSafeAreaLayout.Current);
+            var panel = GuiSafeAreaLayout.Centered(340f, 300f, GuiSafeAreaLayout.Current);
             accessibleUi?.ShowScreen("Bumper Tanks main menu", new AccessibleUiAction[]
             {
-                new("Play Arena", "Start the local arena match.", MenuFrame(panel, -115f, -30f, 230f, 40f), BeginArena),
-                new("Garage", "Change tank color or trail and claim the daily reward.", MenuFrame(panel, -115f, 20f, 110f, 34f), OpenGarageFromMenu),
-                new("Leaderboard", "View Battle Coins rankings.", MenuFrame(panel, 5f, 20f, 110f, 34f), OpenLeaderboardFromMenu)
+                new("Play Arena", "Start the local arena match. Telemetry choice is optional.", MenuFrame(panel, -115f, -70f, 230f, 40f), BeginArena),
+                new("Garage", "Change tank color or trail and claim the daily reward.", MenuFrame(panel, -115f, -20f, 110f, 34f), OpenGarageFromMenu),
+                new("Leaderboard", "View Battle Coins rankings.", MenuFrame(panel, 5f, -20f, 110f, 34f), OpenLeaderboardFromMenu),
+                new("Telemetry sharing choice", !TelemetryConsentSettings.HasChoice
+                    ? "Optional. Choose whether to share gameplay activity from this profile to improve balance. You can play without choosing."
+                    : $"Current choice: {(TelemetryConsentSettings.IsAllowed ? "on" : "off")}. You can change it any time.",
+                    GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 145f, panel.center.y + 25f, 290f, 30f), GuiSafeAreaLayout.Current), null, false),
+                new("Allow gameplay sharing", "Send gameplay activity linked to this game profile to help improve balance. No name or email is sent.", MenuFrame(panel, -115f, 62f, 110f, 36f), () => SetTelemetryConsent(true)),
+                new("No thanks", "Keep optional gameplay telemetry disabled. You can change this choice from the main menu.", MenuFrame(panel, 5f, 62f, 110f, 36f), () => SetTelemetryConsent(false))
             });
         }
 

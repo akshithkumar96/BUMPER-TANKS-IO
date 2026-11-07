@@ -83,6 +83,7 @@ namespace BumperTanks.Frontend
 
         public void Track(string playerId, string eventName)
         {
+            if (!TelemetryConsentSettings.IsAllowed) return;
             StartCoroutine(PostJson("/v1/telemetry", JsonUtility.ToJson(new Telemetry(playerId, eventName)), null));
         }
 
