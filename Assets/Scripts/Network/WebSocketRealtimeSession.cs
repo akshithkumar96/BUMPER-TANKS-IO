@@ -31,6 +31,7 @@ namespace BumperTanks.Network
 
         public event Action<TankSnapshot> SnapshotReceived;
         public event Action<RealtimePickupFrame> PickupFrameReceived;
+        public event Action<RealtimeMatchReceipt> MatchReceiptReceived;
         public event Action<RealtimeRoomJoined> RoomJoined;
         public event Action<string> Error;
         public event Action Disconnected;
@@ -288,6 +289,13 @@ namespace BumperTanks.Network
                         latestSnapshotTick = snapshot.Tick;
                         SnapshotReceived?.Invoke(snapshot);
                     }
+                    break;
+                }
+                case "match_result":
+                {
+                    if (!RealtimeMessageCodec.TryReadMatchReceipt(json, out var receipt))
+                        throw new FormatException("Match result is missing valid server reward data.");
+                    MatchReceiptReceived?.Invoke(receipt);
                     break;
                 }
                 case "error":

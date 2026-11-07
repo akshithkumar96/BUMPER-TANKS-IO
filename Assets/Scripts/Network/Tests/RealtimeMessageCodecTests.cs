@@ -57,6 +57,20 @@ namespace BumperTanks.Network.Tests
         }
 
         [Test]
+        public void MatchReceiptParsesAndRequiresProfileIdentityBinding()
+        {
+            const string playerId = "0123456789abcdef0123456789abcdef";
+            var json = "{\"type\":\"match_result\",\"matchId\":\"fedcba9876543210fedcba9876543210\",\"playerId\":\"" + playerId + "\",\"gems\":4,\"eliminations\":2,\"award\":24,\"profile\":{\"playerId\":\"" + playerId + "\",\"battleCoins\":124,\"matchesPlayed\":1,\"ownedCosmetics\":[]}}";
+
+            Assert.That(RealtimeMessageCodec.TryReadMatchReceipt(json, out var receipt), Is.True);
+            Assert.That(receipt.award, Is.EqualTo(24));
+            Assert.That(receipt.profile.battleCoins, Is.EqualTo(124));
+            var mismatchedProfile = json.Replace("\"profile\":{\"playerId\":\"" + playerId,
+                "\"profile\":{\"playerId\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+            Assert.That(RealtimeMessageCodec.TryReadMatchReceipt(mismatchedProfile, out _), Is.False);
+        }
+
+        [Test]
         public void JoinedMessageParsesAssignedRoomAndPlayer()
         {
             const string json = "{\"type\":\"joined\",\"roomId\":\"room-01\",\"playerId\":3,\"tickRate\":30,\"players\":[{\"playerId\":3,\"displayName\":\"Ace\"}]}";

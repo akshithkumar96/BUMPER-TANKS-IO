@@ -122,4 +122,24 @@ namespace BumperTanks.Network
         void SubmitInput(PlayerInputFrame input);
         void Disconnect();
     }
+
+    [Serializable]
+    public sealed class RealtimeMatchReceipt
+    {
+        public string matchId;
+        public string playerId;
+        public int gems;
+        public int eliminations;
+        public int award;
+        public RealtimeProfileReceipt profile;
+    }
+
+    [Serializable]
+    public sealed class RealtimeProfileReceipt
+    {
+        public string playerId;
+        public int battleCoins;
+        public int matchesPlayed;
+        public string[] ownedCosmetics;
+    }
 }

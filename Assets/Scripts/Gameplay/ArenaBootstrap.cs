@@ -34,10 +34,12 @@ namespace BumperTanks.Gameplay
         private int onlineWinnerPlayerId;
         private int onlineEliminations;
         private int onlineGemCount;
+        private int onlineMatchAward;
         private int appliedPickupTick = -1;
         private float onlineRemainingSeconds;
         private string onlinePhase = string.Empty;
         private bool onlineMatch;
+        private bool onlineMatchResultReceived;
         private bool showFrontMenu = true;
         private bool matchStarted;
         private bool resultAccessibilityShown;
@@ -62,6 +64,7 @@ namespace BumperTanks.Gameplay
             realtime.RoomJoined += OnRealtimeRoomJoined;
             realtime.SnapshotReceived += OnRealtimeSnapshot;
             realtime.PickupFrameReceived += OnRealtimePickupFrame;
+            realtime.MatchReceiptReceived += OnRealtimeMatchReceipt;
             realtime.Error += OnRealtimeError;
             realtime.Disconnected += OnRealtimeDisconnected;
             var heavy = CreateTank("Heavy Dozer Bot", new Vector2(-4f, 3f), TankArchetype.HeavyDozer, false, new Color(1f, 0.55f, 0.15f));
@@ -162,9 +165,12 @@ namespace BumperTanks.Gameplay
                     var label = onlineMatch
                         ? $"Winner: {OnlineWinnerName()}"
                         : match.Winner != null ? $"Winner: {match.Winner.name}" : "Time up";
-                    var panel = GuiSafeAreaLayout.Centered(290f, 140f, safe);
+                    var receivedOnlineReward = onlineMatch && onlineMatchResultReceived;
+                    var panel = GuiSafeAreaLayout.Centered(290f, receivedOnlineReward ? 170f : 140f, safe);
                     GUI.Box(panel, label);
-                    if (GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 80f, panel.center.y + 5f, 160f, 36f), safe), "Play Again"))
+                    if (receivedOnlineReward)
+                        GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 130f, panel.center.y - 20f, 260f, 24f), safe), $"Earned {onlineMatchAward} Battle Coins");
+                    if (GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 80f, panel.center.y + (receivedOnlineReward ? 20f : 5f), 160f, 36f), safe), "Play Again"))
                     {
                         GameServiceClient.Instance?.Track(localPlayerId, "match_rematch");
                         RestartArena();
@@ -330,6 +336,8 @@ namespace BumperTanks.Gameplay
                 }
             onlinePhase = string.Empty;
             onlineWinnerPlayerId = 0;
+            onlineMatchAward = 0;
+            onlineMatchResultReceived = false;
             if (match != null) match.enabled = false;
             foreach (var tank in FindObjectsByType<TankController2D>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             {
@@ -401,6 +409,16 @@ namespace BumperTanks.Gameplay
                     item.Value > 1 ? new Color(1f, 0.78f, 0.2f) : new Color(0.2f, 0.95f, 1f), item.Value > 1 ? 0.42f : 0.34f));
             ReconcilePickupVisuals(onlinePowerUpVisuals, frame.PowerUps, item => item.PickupId, item => item.Position,
                 item => CreatePickupVisual($"Online {item.Type} {item.PickupId}", item.Position, PowerUpColor(item.Type), 0.42f));
+        }
+
+        private void OnRealtimeMatchReceipt(RealtimeMatchReceipt receipt)
+        {
+            if (receipt == null || receipt.profile == null ||
+                !string.Equals(receipt.playerId, ProfileStore.GetServerPlayerId(), StringComparison.Ordinal)) return;
+            GameServiceClient.Instance?.ApplyServerProfile(receipt.profile.battleCoins, receipt.profile.ownedCosmetics);
+            onlineMatchAward = receipt.award;
+            onlineMatchResultReceived = true;
+            ShowResultAccessibility();
         }
 
         private void ReconcilePickupVisuals<T>(Dictionary<int, Transform> visuals, T[] items, Func<T, int> idSelector,
@@ -571,7 +589,7 @@ namespace BumperTanks.Gameplay
         private void ShowResultAccessibility()
         {
             var label = onlineMatch
-                ? $"Winner: {OnlineWinnerName()}"
+                ? $"Winner: {OnlineWinnerName()}" + (onlineMatchResultReceived ? $". Earned {onlineMatchAward} Battle Coins." : string.Empty)
                 : match != null && match.Winner != null ? $"Winner: {match.Winner.name}" : "Match complete";
             var safe = GuiSafeAreaLayout.Current;
             var panel = GuiSafeAreaLayout.Centered(290f, 140f, safe);

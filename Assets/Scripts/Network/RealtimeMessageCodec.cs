@@ -143,6 +143,22 @@ namespace BumperTanks.Network
             return data.code ?? string.Empty;
         }
 
+        public static bool TryReadMatchReceipt(string json, out RealtimeMatchReceipt receipt)
+        {
+            receipt = null;
+            var data = JsonUtility.FromJson<RealtimeMatchReceipt>(json);
+            if (data == null || !string.Equals(ReadType(json), "match_result", StringComparison.Ordinal) ||
+                string.IsNullOrEmpty(data.matchId) || data.matchId.Length != 32 ||
+                string.IsNullOrEmpty(data.playerId) || data.playerId.Length != 32 ||
+                data.gems < 0 || data.gems > 1000000 || data.eliminations < 0 || data.eliminations > 7 ||
+                data.award < 0 || data.award > 200 || data.profile == null ||
+                !string.Equals(data.profile.playerId, data.playerId, StringComparison.Ordinal) ||
+                data.profile.battleCoins < 0 || data.profile.matchesPlayed < 1) return false;
+            data.profile.ownedCosmetics ??= Array.Empty<string>();
+            receipt = data;
+            return true;
+        }
+
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
     }
 }

@@ -147,6 +147,7 @@ def join(address, index, origin=None, archetype=None):
     assert response["tickRate"] == 30, response
     assert isinstance(response["playerId"], int), response
     assert len(response["roomId"]) == 32, response
+    response["_externalPlayerId"] = identity["playerId"]
     return client, response
 
 
@@ -448,7 +449,25 @@ def main():
         assert sudden_death["arenaBounds"] == {"halfWidth": 1.5, "halfHeight": 1.5}, sudden_death
         assert sudden_death["gems"] and all(gem["value"] == 2 for gem in sudden_death["gems"]), sudden_death
 
-        print("Realtime WebSocket smoke passed: matchmaking, 8-player cap, 30 Hz snapshots, server gem/power-up collection, Nitro/Mega-Bullet/Magnet effects, 12-second respawn, doubled sudden-death gems, authoritative combat, boundary steps, bots, disconnect, and invalid-input rejection.")
+        finished = wait_for(first, lambda message: message.get("type") == "snapshot" and message.get("phase") == "finished", timeout=40)
+        first_final = next(player for player in finished["players"] if player["playerId"] == first_join["playerId"])
+        expected_award = min(200, first_final["gems"] + first_final["eliminations"] * 10)
+        receipt = wait_for(first, lambda message: message.get("type") == "match_result", timeout=2)
+        assert receipt["matchId"] == first_join["roomId"], receipt
+        assert receipt["playerId"] == first_join["_externalPlayerId"], receipt
+        assert receipt["gems"] == first_final["gems"] and receipt["eliminations"] == first_final["eliminations"], receipt
+        assert receipt["award"] == expected_award, receipt
+        assert receipt["profile"]["matchesPlayed"] == 1, receipt
+        assert receipt["profile"]["battleCoins"] == expected_award, receipt
+        duplicate_deadline = time.monotonic() + 0.35
+        while time.monotonic() < duplicate_deadline:
+            try:
+                message = first.receive()
+            except socket.timeout:
+                continue
+            assert message.get("type") != "match_result", message
+
+        print("Realtime WebSocket smoke passed: authenticated identity/matchmaking, 8-player cap, 30 Hz snapshots, server gem/power-up collection, Nitro/Mega-Bullet/Magnet effects, 12-second respawn, doubled sudden-death gems, authoritative combat, idempotent server-issued match reward receipt, boundary steps, bots, disconnect, and invalid-input rejection.")
     finally:
         for client in clients:
             if client is not None:

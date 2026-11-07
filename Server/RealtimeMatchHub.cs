@@ -21,6 +21,7 @@ public sealed class RealtimeMatchHub : IDisposable
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly PlayerIdentityRepository identities;
+    private readonly ProfileRepository profiles;
     private readonly object gate = new();
     private readonly Dictionary<string, RealtimeRoom> rooms = new(StringComparer.Ordinal);
     private readonly HashSet<string> connectedPlayerIds = new(StringComparer.Ordinal);
@@ -28,7 +29,11 @@ public sealed class RealtimeMatchHub : IDisposable
     private int activeConnections;
     private bool disposed;
 
-    public RealtimeMatchHub(PlayerIdentityRepository identities) => this.identities = identities;
+    public RealtimeMatchHub(PlayerIdentityRepository identities, ProfileRepository profiles)
+    {
+        this.identities = identities;
+        this.profiles = profiles;
+    }
 
     public async Task HandleAsync(HttpContext context)
     {
@@ -99,7 +104,7 @@ public sealed class RealtimeMatchHub : IDisposable
                                 error = "rooms_full";
                                 break;
                             }
-                            room = new RealtimeRoom(Guid.NewGuid().ToString("N"));
+                            room = new RealtimeRoom(Guid.NewGuid().ToString("N"), profiles);
                             rooms.Add(room.RoomId, room);
                         }
 
@@ -289,6 +294,8 @@ public sealed class RealtimeMatchHub : IDisposable
     {
         private readonly object sync = new();
         private readonly Dictionary<int, RealtimePlayer> players = new();
+        private readonly Dictionary<string, RealtimePlayer> realParticipants = new(StringComparer.Ordinal);
+        private readonly ProfileRepository profiles;
         private readonly List<RealtimeGemPickup> gems = new();
         private readonly List<RealtimePowerUpPickup> powerUps = new();
         private readonly Stopwatch elapsed = Stopwatch.StartNew();
@@ -299,13 +306,15 @@ public sealed class RealtimeMatchHub : IDisposable
         private bool started;
         private bool botsFilled;
         private bool finished;
+        private bool matchReceiptsIssued;
         private int? winnerPlayerId;
         private long matchStartedTimestamp;
         private bool disposed;
 
-        public RealtimeRoom(string roomId)
+        public RealtimeRoom(string roomId, ProfileRepository profiles)
         {
             RoomId = roomId;
+            this.profiles = profiles;
             var seed = StableSeed(roomId);
             var jitter = new WireVector(((int)(seed % 5) - 2) * 0.1f, ((int)((seed / 5) % 5) - 2) * 0.1f);
             WireVector Place(float x, float y) => new(x + jitter.X, y + jitter.Y);
@@ -334,7 +343,7 @@ public sealed class RealtimeMatchHub : IDisposable
         public string RoomId { get; }
         public long CreatedAt { get; } = Stopwatch.GetTimestamp();
         public bool IsEmpty { get { lock (sync) return players.Values.All(player => player.IsBot); } }
-        public bool CanAcceptPlayer { get { lock (sync) return !disposed && players.Count < MaxPlayersPerRoom; } }
+        public bool CanAcceptPlayer { get { lock (sync) return !disposed && !finished && players.Count < MaxPlayersPerRoom; } }
 
         public bool TryAddPlayer(int id, string externalId, string displayName, string archetype, RealtimeConnection connection, out RealtimePlayer? added)
         {
@@ -349,6 +358,7 @@ public sealed class RealtimeMatchHub : IDisposable
                 var player = new RealtimePlayer(id, externalId, displayName, archetype, false, connection,
                     new WireVector((slot % 4 - 1.5f) * 2.5f, slot / 4 == 0 ? -2.5f : 2.5f));
                 players.Add(id, player);
+                realParticipants[externalId] = player;
                 added = player;
                 return true;
             }
@@ -425,6 +435,7 @@ public sealed class RealtimeMatchHub : IDisposable
                     await Task.Delay(TimeSpan.FromMilliseconds(1000d / TickRate), token);
                     object? snapshot = null;
                     RealtimeConnection[] recipients = Array.Empty<RealtimeConnection>();
+                    List<(RealtimeConnection Connection, object Receipt)> matchReceipts = new();
                     lock (sync)
                     {
                         if (disposed || players.Values.All(player => player.IsBot)) return;
@@ -459,6 +470,28 @@ public sealed class RealtimeMatchHub : IDisposable
                         ResolveShots();
                         ResolveBumps(matchElapsed);
                         ResolveMatchEnd(matchElapsed);
+                        if (finished && !matchReceiptsIssued)
+                        {
+                            matchReceiptsIssued = true;
+                            foreach (var participant in realParticipants.Values)
+                            {
+                                profiles.TryCompleteMatch(participant.ExternalId, RoomId, participant.Gems,
+                                    participant.Eliminations, out var profile, out var award);
+                                if (participant.Connection is not null)
+                                {
+                                    matchReceipts.Add((participant.Connection, new
+                                    {
+                                        type = "match_result",
+                                        matchId = RoomId,
+                                        playerId = participant.ExternalId,
+                                        gems = participant.Gems,
+                                        eliminations = participant.Eliminations,
+                                        award,
+                                        profile
+                                    }));
+                                }
+                            }
+                        }
                         var phase = finished ? "finished" : GetPhase(matchElapsed);
                         var states = players.Values.Select(player => new
                         {
@@ -500,6 +533,8 @@ public sealed class RealtimeMatchHub : IDisposable
                     }
                     if (snapshot is not null && recipients.Length > 0)
                         await Task.WhenAll(recipients.Select(connection => SendSnapshotSafelyAsync(connection, snapshot, token)));
+                    if (matchReceipts.Count > 0)
+                        await Task.WhenAll(matchReceipts.Select(receipt => SendMatchReceiptSafelyAsync(receipt.Connection, receipt.Receipt, token)));
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -513,6 +548,13 @@ public sealed class RealtimeMatchHub : IDisposable
         private static async Task SendSnapshotSafelyAsync(RealtimeConnection connection, object snapshot, CancellationToken cancellationToken)
         {
             try { await connection.SendAsync(snapshot, cancellationToken); }
+            catch (WebSocketException) { }
+            catch (ObjectDisposedException) { }
+        }
+
+        private static async Task SendMatchReceiptSafelyAsync(RealtimeConnection connection, object receipt, CancellationToken cancellationToken)
+        {
+            try { await connection.SendAsync(receipt, cancellationToken); }
             catch (WebSocketException) { }
             catch (ObjectDisposedException) { }
         }

@@ -1,7 +1,7 @@
 {
   "name": "BumperTanks.Frontend",
   "rootNamespace": "BumperTanks.Frontend",
-  "references": ["BumperTanks.Core"],
+  "references": ["BumperTanks.Core", "BumperTanks.Network"],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

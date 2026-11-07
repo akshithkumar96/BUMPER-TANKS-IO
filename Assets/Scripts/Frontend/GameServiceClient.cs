@@ -137,6 +137,14 @@ namespace BumperTanks.Frontend
             ProfileStore.Save(profile);
         }
 
+        public void ApplyServerProfile(int battleCoins, string[] ownedCosmetics)
+        {
+            var profile = ProfileStore.Load();
+            profile.BattleCoins = battleCoins;
+            if (ownedCosmetics != null) profile.OwnedCosmetics = ownedCosmetics;
+            ProfileStore.Save(profile);
+        }
+
         private IEnumerator GetJson(string path, Action<string> onSuccess, Action<string> onError)
         {
             using var request = UnityWebRequest.Get(baseUrl.TrimEnd('/') + path);
