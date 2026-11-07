@@ -20,12 +20,15 @@ public sealed class RealtimeMatchHub : IDisposable
     public static readonly TimeSpan BotFillDelay = TimeSpan.FromMilliseconds(2500);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly PlayerIdentityRepository identities;
     private readonly object gate = new();
     private readonly Dictionary<string, RealtimeRoom> rooms = new(StringComparer.Ordinal);
     private readonly HashSet<string> connectedPlayerIds = new(StringComparer.Ordinal);
     private int nextPlayerId;
     private int activeConnections;
     private bool disposed;
+
+    public RealtimeMatchHub(PlayerIdentityRepository identities) => this.identities = identities;
 
     public async Task HandleAsync(HttpContext context)
     {
@@ -62,7 +65,7 @@ public sealed class RealtimeMatchHub : IDisposable
         {
             var joinFrame = await ReceiveFrameAsync(socket, cancellationToken);
             if (joinFrame is null) return;
-            if (!TryParseJoin(joinFrame, out var playerId, out var displayName, out var archetype, out var error))
+            if (!TryParseJoin(joinFrame, identities, out var playerId, out var displayName, out var archetype, out var error))
             {
                 await connection.SendAsync(new { type = "error", code = error }, cancellationToken);
                 await CloseAsync(socket, WebSocketCloseStatus.PolicyViolation, "invalid join", cancellationToken);
@@ -165,7 +168,7 @@ public sealed class RealtimeMatchHub : IDisposable
         }
     }
 
-    private static bool TryParseJoin(string frame, out string playerId, out string displayName, out string archetype, out string error)
+    private static bool TryParseJoin(string frame, PlayerIdentityRepository identities, out string playerId, out string displayName, out string archetype, out string error)
     {
         playerId = string.Empty;
         displayName = string.Empty;
@@ -174,8 +177,19 @@ public sealed class RealtimeMatchHub : IDisposable
         using var document = JsonDocument.Parse(frame);
         var root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out var type) || type.GetString() != "join") return false;
+        if (!root.TryGetProperty("accessToken", out var credential) || credential.ValueKind != JsonValueKind.String ||
+            !identities.TryAuthenticate(credential.GetString(), out var authenticatedPlayerId))
+        {
+            error = "invalid_credentials";
+            return false;
+        }
         if (!root.TryGetProperty("playerId", out var id) || id.ValueKind != JsonValueKind.String || !RequestValidation.IsPlayerId(id.GetString())) return false;
         if (id.GetString() != id.GetString()!.ToLowerInvariant()) return false;
+        if (!string.Equals(id.GetString(), authenticatedPlayerId, StringComparison.Ordinal))
+        {
+            error = "invalid_credentials";
+            return false;
+        }
         if (!root.TryGetProperty("displayName", out var name) || name.ValueKind != JsonValueKind.String) return false;
         var candidate = name.GetString()?.Trim() ?? string.Empty;
         if (candidate.Length is < 1 or > 24 || candidate.Any(character => !char.IsLetterOrDigit(character) && character is not ' ' and not '_' and not '-')) return false;
@@ -185,7 +199,7 @@ public sealed class RealtimeMatchHub : IDisposable
                 archetypeElement.GetString() is not ("SpeedyBumper" or "HeavyDozer" or "RicochetSpinner")) return false;
             archetype = archetypeElement.GetString()!;
         }
-        playerId = id.GetString()!;
+        playerId = authenticatedPlayerId;
         displayName = candidate;
         error = string.Empty;
         return true;

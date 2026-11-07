@@ -11,6 +11,7 @@ import struct
 import sys
 import threading
 import time
+import urllib.request
 
 
 class WebSocketClient:
@@ -124,13 +125,20 @@ class WebSocketClient:
         self.socket.close()
 
 
-def player_id(index):
-    return f"{index:032x}"
+def create_identity(address):
+    request = urllib.request.Request(f"http://{address}/v1/identity/anonymous", data=b"", method="POST")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        identity = json.loads(response.read().decode("utf-8"))
+    assert len(identity["playerId"]) == 32, identity
+    assert len(identity["accessToken"]) == 64, identity
+    return identity
 
 
 def join(address, index, origin=None, archetype=None):
+    identity = create_identity(address)
     client = WebSocketClient(address, origin=origin)
-    message = {"type": "join", "playerId": player_id(index), "displayName": f"Smoke {index}"}
+    message = {"type": "join", "playerId": identity["playerId"], "accessToken": identity["accessToken"],
+               "displayName": f"Smoke {index}"}
     if archetype is not None:
         message["archetype"] = archetype
     client.send(message)
@@ -140,6 +148,19 @@ def join(address, index, origin=None, archetype=None):
     assert isinstance(response["playerId"], int), response
     assert len(response["roomId"]) == 32, response
     return client, response
+
+
+def assert_join_rejected(address, player_id, token=None):
+    client = WebSocketClient(address)
+    message = {"type": "join", "playerId": player_id, "displayName": "Unauthenticated"}
+    if token is not None:
+        message["accessToken"] = token
+    try:
+        client.send(message)
+        response = client.receive()
+        assert response.get("type") == "error" and response.get("code") == "invalid_credentials", response
+    finally:
+        client.close()
 
 
 def wait_for(client, predicate, timeout=5, allow_error=False):
@@ -233,7 +254,7 @@ def fire_until_hit(client, snapshot, shooter_id, target_id, previous_health, las
         aim_y = target["position"]["y"] - shooter["position"]["y"]
         length = max(0.0001, math.hypot(aim_x, aim_y))
         input_tick = max(last_client_tick + 1, current["tick"] + 1)
-        time.sleep(0.02)  # Respect the server's 60 Hz per-player input limit.
+        time.sleep(0.04)  # Leave margin below the server's 60 Hz per-player input limit.
         client.send({
             "type": "input", "tick": input_tick,
             "movement": {"x": 0, "y": 0},
@@ -259,6 +280,12 @@ def main():
             raise AssertionError("WebSocket accepted an origin outside Cors__AllowedOrigins")
         except ConnectionError as rejected:
             assert "403" in str(rejected), rejected
+
+        first_identity = create_identity(address)
+        second_identity = create_identity(address)
+        assert_join_rejected(address, first_identity["playerId"])
+        assert_join_rejected(address, first_identity["playerId"], "f" * 64)
+        assert_join_rejected(address, second_identity["playerId"], first_identity["accessToken"])
 
         first, first_join = join(address, 1, origin="http://localhost:5173")
         clients.append(first)
@@ -305,6 +332,17 @@ def main():
         assert all(gem["pickupId"] not in (1, 2) for gem in moved["gems"]), moved
         assert not moved["powerUps"], moved
 
+        # Verify a live shot before running the separate 2.5-second bot-fill scenario.
+        combat_shooter_id = first_room_player_ids[0]
+        target_id = clear_shot_target(moved, combat_shooter_id)["playerId"]
+        previous_health = next(player["health"] for player in moved["players"] if player["playerId"] == target_id)
+        hit, target_state, shooter_last_client_tick = fire_until_hit(
+            first, moved, combat_shooter_id, target_id, previous_health, 19)
+        impulse_speed = math.hypot(target_state["velocity"]["x"], target_state["velocity"]["y"])
+        assert target_state["health"] < previous_health and impulse_speed > 0.5, target_state
+        last_client_tick = shooter_last_client_tick
+        spinner_last_client_tick = 19
+
         time.sleep(0.05)  # Let zero-movement frames settle before joining the next room.
 
         ninth, ninth_join = join(address, 9)
@@ -330,18 +368,6 @@ def main():
         rejection = wait_for(invalid, lambda message: message.get("type") == "error", timeout=2, allow_error=True)
         assert rejection["code"] == "invalid_input", rejection
 
-        # Use the Spinner near the right side so authoritative recoil moves it
-        # back into the arena while the bots keep moving.
-        combat_shooter_id = first_room_player_ids[2]
-        target_id = clear_shot_target(moved, combat_shooter_id)["playerId"]
-        previous_health = next(player["health"] for player in moved["players"] if player["playerId"] == target_id)
-        spinner = clients[2]
-        hit, target_state, spinner_last_client_tick = fire_until_hit(
-            spinner, moved, combat_shooter_id, target_id, previous_health, 19)
-        impulse_speed = math.hypot(target_state["velocity"]["x"], target_state["velocity"]["y"])
-        assert target_state["health"] < previous_health and impulse_speed > 0.5, target_state
-        last_client_tick = 19
-
         second.send({
             "type": "input", "tick": 20,
             "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
@@ -353,6 +379,7 @@ def main():
         assert next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])["shielded"], heavy_shield
 
         spinner_id = first_room_player_ids[2]
+        spinner = clients[2]
         spinner.send({
             "type": "input", "tick": spinner_last_client_tick + 1,
             "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},

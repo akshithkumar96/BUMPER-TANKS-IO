@@ -16,7 +16,7 @@ var app = builder.Build();
 var profiles = new ProfileRepository(builder.Configuration);
 var identities = new PlayerIdentityRepository(builder.Configuration);
 var telemetry = new TelemetryRepository(builder.Configuration);
-var realtime = new RealtimeMatchHub();
+var realtime = new RealtimeMatchHub(identities);
 var attestationSecret = builder.Configuration["Rewards:MatchAttestationSecret"];
 var requireMatchAttestation = bool.TryParse(builder.Configuration["Rewards:RequireMatchAttestation"], out var configuredAttestationRequirement)
     ? configuredAttestationRequirement
