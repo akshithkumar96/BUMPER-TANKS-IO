@@ -436,7 +436,10 @@ public sealed class RealtimeMatchHub : IDisposable
                         tick++;
                         var matchElapsed = TimeSpan.FromSeconds((Stopwatch.GetTimestamp() - matchStartedTimestamp) / (double)Stopwatch.Frequency);
                         var arenaBounds = GetArenaBounds(matchElapsed);
-                        foreach (var player in players.Values) Simulate(player, tick, matchElapsed, arenaBounds);
+                        var tickPlayers = players.Values.ToArray();
+                        foreach (var player in tickPlayers.Where(player => player.IsBot))
+                            UpdateBotInput(player, tickPlayers, tick, arenaBounds);
+                        foreach (var player in tickPlayers) Simulate(player, tick, matchElapsed, arenaBounds);
                         ResolvePickups(matchElapsed);
                         ResolveWhirlwinds();
                         ResolveShots();
@@ -500,6 +503,78 @@ public sealed class RealtimeMatchHub : IDisposable
             catch (ObjectDisposedException) { }
         }
 
+        private void UpdateBotInput(RealtimePlayer bot, IReadOnlyList<RealtimePlayer> tickPlayers, int tick, ArenaBounds arenaBounds)
+        {
+            var targets = tickPlayers
+                .Where(candidate => candidate.Alive && candidate.PlayerId != bot.PlayerId)
+                .Select(candidate => new
+                {
+                    Player = candidate,
+                    DistanceSquared = (candidate.Position - bot.Position).LengthSquared
+                })
+                .OrderBy(candidate => candidate.DistanceSquared * (candidate.Player.IsBot ? 1.2f : 1f))
+                .ToArray();
+
+            var target = targets.FirstOrDefault()?.Player;
+            var movement = new WireVector(0f, 0f);
+            if (target is not null)
+            {
+                var toTarget = target.Position - bot.Position;
+                var distanceSquared = toTarget.LengthSquared;
+                var distance = MathF.Sqrt(distanceSquared);
+                var toward = toTarget.Normalized;
+                var orbitDirection = (Math.Abs(bot.PlayerId) % 2 == 0 ? 1f : -1f);
+                var tangent = new WireVector(-toward.Y * orbitDirection, toward.X * orbitDirection);
+
+                // Close in to bumping range, then strafe to make the bots harder to line up.
+                movement = distance > 2.4f
+                    ? toward + tangent * 0.22f
+                    : tangent + toward * 0.15f;
+
+                // Aim directly at the target because server shots are hitscan line checks.
+                var aim = toward;
+                var aimError = MathF.Sin(tick * 0.071f + Math.Abs(bot.PlayerId)) * 0.012f;
+                aim = new WireVector(
+                    aim.X * MathF.Cos(aimError) - aim.Y * MathF.Sin(aimError),
+                    aim.X * MathF.Sin(aimError) + aim.Y * MathF.Cos(aimError)).Normalized;
+                bot.Aim = aim.LengthSquared > 0.001f ? aim : new WireVector(0f, 1f);
+
+                var along = Dot(toTarget, bot.Aim);
+                var perpendicular = toTarget - bot.Aim * along;
+                if (distanceSquared <= 11.5f * 11.5f && along >= 0.4f && perpendicular.LengthSquared <= 0.55f * 0.55f)
+                    bot.FireBufferedUntilTick = Math.Max(bot.FireBufferedUntilTick, tick + TickRate / 5);
+
+                if (tick >= bot.NextAbilityTick)
+                {
+                    var shouldUseAbility = bot.Archetype switch
+                    {
+                        "SpeedyBumper" => distance > 3.5f,
+                        "HeavyDozer" => distance <= 2.8f,
+                        "RicochetSpinner" => targets.Any(candidate => candidate.DistanceSquared <= 2.5f * 2.5f),
+                        _ => false
+                    };
+                    if (shouldUseAbility)
+                        bot.AbilityBufferedUntilTick = Math.Max(bot.AbilityBufferedUntilTick, tick + 1);
+                }
+            }
+            else
+            {
+                bot.Aim = new WireVector(0f, 1f);
+                movement = new WireVector(-bot.Position.X, -bot.Position.Y).Normalized;
+            }
+
+            // Collapse and sudden-death bounds shrink. Steer inward before boundary damage starts.
+            var edgeSteering = new WireVector(
+                bot.Position.X > arenaBounds.HalfWidth - 1.2f ? -(bot.Position.X - (arenaBounds.HalfWidth - 1.2f)) :
+                    bot.Position.X < -arenaBounds.HalfWidth + 1.2f ? -((bot.Position.X + arenaBounds.HalfWidth - 1.2f)) : 0f,
+                bot.Position.Y > arenaBounds.HalfHeight - 1.2f ? -(bot.Position.Y - (arenaBounds.HalfHeight - 1.2f)) :
+                    bot.Position.Y < -arenaBounds.HalfHeight + 1.2f ? -((bot.Position.Y + arenaBounds.HalfHeight - 1.2f)) : 0f);
+            if (edgeSteering.LengthSquared > 0.0001f)
+                movement += edgeSteering.Normalized * 1.5f;
+
+            bot.Movement = movement.LengthSquared > 1f ? movement.Normalized : movement;
+        }
+
         private void Simulate(RealtimePlayer player, int tick, TimeSpan matchElapsed, ArenaBounds arenaBounds)
         {
             const float dt = 1f / TickRate;
@@ -517,12 +592,6 @@ public sealed class RealtimeMatchHub : IDisposable
                 _ => 1f
             };
             if (tick < player.NitroUntilTick) speedMultiplier *= 1.5f;
-            if (player.IsBot)
-            {
-                var phase = tick * 0.015f + Math.Abs(player.PlayerId);
-                movement = new WireVector(MathF.Cos(phase), MathF.Sin(phase));
-                player.Aim = movement.LengthSquared > 0.001f ? movement.Normalized : new WireVector(0f, 1f);
-            }
             if (tick <= player.AbilityBufferedUntilTick && tick >= player.NextAbilityTick)
             {
                 var abilityCooldown = player.Archetype switch
