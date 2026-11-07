@@ -12,9 +12,9 @@ namespace BumperTanks.Gameplay
     public sealed class ArenaBootstrap : MonoBehaviour
     {
         public const string RealtimeEndpointPlayerPrefsKey = "bumper-tanks.realtime-endpoint";
-        private const string DefaultRealtimeEndpoint = "ws://127.0.0.1:5188/v1/realtime";
         private static ArenaBootstrap current;
-        [SerializeField] private string realtimeEndpoint = DefaultRealtimeEndpoint;
+        private string realtimeEndpoint;
+        private string endpointOverrideError;
         private TankController2D player;
         private MatchDirector match;
         private WebSocketRealtimeSession realtime;
@@ -49,11 +49,29 @@ namespace BumperTanks.Gameplay
         private void Awake()
         {
             current = this;
+            var serviceClient = FindFirstObjectByType<GameServiceClient>();
+            if (serviceClient == null) serviceClient = new GameObject("Game Service Client").AddComponent<GameServiceClient>();
+            realtimeEndpoint = serviceClient.RealtimeEndpoint;
             var configuredEndpoint = PlayerPrefs.GetString(RealtimeEndpointPlayerPrefsKey, string.Empty);
-            if (!string.IsNullOrWhiteSpace(configuredEndpoint)) realtimeEndpoint = configuredEndpoint.Trim();
+            if (!string.IsNullOrWhiteSpace(configuredEndpoint))
+            {
+                var isDevelopmentBuild = Application.isEditor || Debug.isDebugBuild;
+                if (ServiceEndpointSettings.TryValidateRealtimeOverride(configuredEndpoint, isDevelopmentBuild, out var normalized, out var error))
+                    realtimeEndpoint = normalized;
+                else if (isDevelopmentBuild)
+                {
+                    realtimeEndpoint = string.Empty;
+                    endpointOverrideError = "Saved realtime endpoint is invalid: " + error;
+                }
+                else
+                {
+                    Debug.LogWarning("Ignoring insecure saved realtime endpoint in this release: " + error);
+                    PlayerPrefs.DeleteKey(RealtimeEndpointPlayerPrefsKey);
+                    PlayerPrefs.Save();
+                }
+            }
             localPlayerId = ProfileStore.GetOrCreatePlayerId();
             Time.timeScale = 0f;
-            if (FindFirstObjectByType<GameServiceClient>() == null) new GameObject("Game Service Client").AddComponent<GameServiceClient>();
             match = gameObject.AddComponent<MatchDirector>();
             CreateCamera();
             CreateArenaBounds();
@@ -190,12 +208,16 @@ namespace BumperTanks.Gameplay
 
         public static void ConfigureRealtimeEndpoint(string endpoint)
         {
-            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var parsed) ||
-                (parsed.Scheme != "ws" && parsed.Scheme != "wss"))
-                throw new ArgumentException("Realtime endpoint must be a ws:// or wss:// URL.", nameof(endpoint));
-            PlayerPrefs.SetString(RealtimeEndpointPlayerPrefsKey, parsed.AbsoluteUri.TrimEnd('/'));
+            if (!ServiceEndpointSettings.TryValidateRealtimeOverride(endpoint,
+                Application.isEditor || Debug.isDebugBuild, out var normalized, out var error))
+                throw new ArgumentException(error, nameof(endpoint));
+            PlayerPrefs.SetString(RealtimeEndpointPlayerPrefsKey, normalized);
             PlayerPrefs.Save();
-            if (current != null) current.realtimeEndpoint = parsed.AbsoluteUri.TrimEnd('/');
+            if (current != null)
+            {
+                current.realtimeEndpoint = normalized;
+                current.endpointOverrideError = null;
+            }
         }
 
         private void BeginArena()
@@ -205,8 +227,15 @@ namespace BumperTanks.Gameplay
             ShowMatchAccessibility();
             if (realtime != null && !realtime.IsConnected && !realtime.IsConnecting)
             {
-                realtimeStatus = "Connecting to online matchmaking…";
-                GameServiceClient.Instance?.ConnectRealtime(realtime, realtimeEndpoint, "Player", player != null ? player.Archetype.ToString() : "SpeedyBumper");
+                var service = GameServiceClient.Instance;
+                if (!string.IsNullOrEmpty(endpointOverrideError)) realtimeStatus = "Online unavailable. " + endpointOverrideError;
+                else if (service == null || !service.EndpointConfigurationValid) realtimeStatus = "Online unavailable. " + (service != null ? service.EndpointConfigurationError : "Service client unavailable.");
+                else if (string.IsNullOrEmpty(realtimeEndpoint)) realtimeStatus = "Online unavailable. Configure a secure realtime endpoint in ServiceEndpointSettings.";
+                else
+                {
+                    realtimeStatus = "Connecting to online matchmaking…";
+                    service.ConnectRealtime(realtime, realtimeEndpoint, "Player", player != null ? player.Archetype.ToString() : "SpeedyBumper");
+                }
             }
             if (matchStarted) return;
             matchStarted = true;
