@@ -115,6 +115,49 @@ namespace BumperTanks.Network
         public PowerUpPickupSnapshot[] PowerUps { get; }
     }
 
+    public readonly struct RealtimeShotTrace
+    {
+        public RealtimeShotTrace(int shotId, int ownerPlayerId, int segmentIndex, int bounceIndex, string type,
+            Vector2 start, Vector2 end, int hitPlayerId, bool hit, bool shieldBlocked, bool deflected = false)
+        {
+            ShotId = shotId;
+            OwnerPlayerId = ownerPlayerId;
+            SegmentIndex = segmentIndex;
+            BounceIndex = bounceIndex;
+            Type = type ?? string.Empty;
+            Start = start;
+            End = end;
+            HitPlayerId = hitPlayerId;
+            Hit = hit;
+            ShieldBlocked = shieldBlocked;
+            Deflected = deflected;
+        }
+
+        public int ShotId { get; }
+        public int OwnerPlayerId { get; }
+        public int SegmentIndex { get; }
+        public int BounceIndex { get; }
+        public string Type { get; }
+        public Vector2 Start { get; }
+        public Vector2 End { get; }
+        public int HitPlayerId { get; }
+        public bool Hit { get; }
+        public bool ShieldBlocked { get; }
+        public bool Deflected { get; }
+    }
+
+    public readonly struct RealtimeShotFrame
+    {
+        public RealtimeShotFrame(int tick, RealtimeShotTrace[] traces)
+        {
+            Tick = tick;
+            Traces = traces ?? Array.Empty<RealtimeShotTrace>();
+        }
+
+        public int Tick { get; }
+        public RealtimeShotTrace[] Traces { get; }
+    }
+
     public interface IRealtimeSession : IDisposable
     {
         event Action<TankSnapshot> SnapshotReceived;

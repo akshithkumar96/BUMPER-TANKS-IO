@@ -296,12 +296,14 @@ public sealed class RealtimeMatchHub : IDisposable
         private readonly Dictionary<int, RealtimePlayer> players = new();
         private readonly Dictionary<string, RealtimePlayer> realParticipants = new(StringComparer.Ordinal);
         private readonly ProfileRepository profiles;
+        private readonly List<RealtimeShotSegment> shotSegments = new();
         private readonly List<RealtimeGemPickup> gems = new();
         private readonly List<RealtimePowerUpPickup> powerUps = new();
         private readonly Stopwatch elapsed = Stopwatch.StartNew();
         private readonly CancellationTokenSource stop = new();
         private Task? loop;
         private int tick;
+        private int nextShotId;
         private int nextBotId = -1;
         private bool started;
         private bool botsFilled;
@@ -461,13 +463,14 @@ public sealed class RealtimeMatchHub : IDisposable
                         tick++;
                         var matchElapsed = TimeSpan.FromSeconds((Stopwatch.GetTimestamp() - matchStartedTimestamp) / (double)Stopwatch.Frequency);
                         var arenaBounds = GetArenaBounds(matchElapsed);
+                        shotSegments.Clear();
                         var tickPlayers = players.Values.ToArray();
                         foreach (var player in tickPlayers.Where(player => player.IsBot))
                             UpdateBotInput(player, tickPlayers, tick, arenaBounds);
                         foreach (var player in tickPlayers) Simulate(player, tick, matchElapsed, arenaBounds);
                         ResolvePickups(matchElapsed);
                         ResolveWhirlwinds();
-                        ResolveShots();
+                        ResolveShots(arenaBounds);
                         ResolveBumps(matchElapsed);
                         ResolveMatchEnd(matchElapsed);
                         if (finished && !matchReceiptsIssued)
@@ -528,6 +531,20 @@ public sealed class RealtimeMatchHub : IDisposable
                                 pickupId = powerUp.PickupId,
                                 type = powerUp.Type,
                                 position = new { x = powerUp.Position.X, y = powerUp.Position.Y }
+                            }).ToArray(),
+                            shots = shotSegments.Select(shot => new
+                            {
+                                shotId = shot.ShotId,
+                                ownerPlayerId = shot.OwnerPlayerId,
+                                segmentIndex = shot.SegmentIndex,
+                                bounceIndex = shot.BounceIndex,
+                                type = shot.Type,
+                                start = new { x = shot.Start.X, y = shot.Start.Y },
+                                end = new { x = shot.End.X, y = shot.End.Y },
+                                hitPlayerId = shot.HitPlayerId,
+                                hit = shot.Hit,
+                                shieldBlocked = shot.ShieldBlocked,
+                                deflected = shot.DeflectedBySpinner
                             }).ToArray()
                         };
                     }
@@ -725,34 +742,107 @@ public sealed class RealtimeMatchHub : IDisposable
             }
         }
 
-        private void ResolveShots()
+        private void ResolveShots(ArenaBounds arenaBounds)
         {
             foreach (var shooter in players.Values.Where(player => player.Alive && player.ShotPending))
             {
                 shooter.ShotPending = false;
                 var direction = shooter.Aim.Normalized;
-                RealtimePlayer? target = null;
-                var nearestDistance = 12f;
-                foreach (var candidate in players.Values)
+                if (direction.LengthSquared < 0.001f) direction = new WireVector(0f, 1f);
+                var spinnerLaser = shooter.Archetype == "RicochetSpinner";
+                var shotId = ++nextShotId;
+                var maxBounces = spinnerLaser ? 3 : 0;
+                var remainingRange = spinnerLaser ? 48f : 12f;
+                var origin = shooter.Position;
+                var segmentIndex = 0;
+                while (segmentIndex <= maxBounces && remainingRange > 0.05f)
                 {
-                    if (!candidate.Alive || candidate.PlayerId == shooter.PlayerId) continue;
-                    var offset = candidate.Position - shooter.Position;
-                    var along = Dot(offset, direction);
-                    if (along is < 0.4f or > 12f) continue;
-                    var perpendicular = offset - direction * along;
-                    if (perpendicular.LengthSquared > 0.55f * 0.55f || along >= nearestDistance) continue;
-                    target = candidate;
-                    nearestDistance = along;
+                    GetBoundaryDistance(origin, direction, arenaBounds, out var wallDistance, out var reflectX, out var reflectY);
+                    var segmentLimit = MathF.Min(remainingRange, wallDistance);
+                    RealtimePlayer? target = null;
+                    var nearestDistance = segmentLimit;
+                    foreach (var candidate in players.Values)
+                    {
+                        if (!candidate.Alive || candidate.PlayerId == shooter.PlayerId) continue;
+                        var offset = candidate.Position - origin;
+                        var along = Dot(offset, direction);
+                        if (along is < 0.2f || along > segmentLimit || along >= nearestDistance) continue;
+                        var perpendicular = offset - direction * along;
+                        if (perpendicular.LengthSquared > 0.55f * 0.55f) continue;
+                        target = candidate;
+                        nearestDistance = along;
+                    }
+
+                    var endpoint = origin + direction * nearestDistance;
+                    var blockedByShield = false;
+                    var deflectedBySpinner = false;
+                    if (target is not null)
+                    {
+                        var shieldActive = tick < target.ShieldUntilTick && target.Archetype == "HeavyDozer";
+                        var incomingFromFront = shieldActive && Dot(target.Aim.Normalized, direction * -1f) >= 0.5f;
+                        blockedByShield = incomingFromFront;
+                        deflectedBySpinner = !incomingFromFront && target.Archetype == "RicochetSpinner" &&
+                                             tick < target.WhirlwindUntilTick;
+                        if (incomingFromFront)
+                        {
+                            var reflectedImpulse = 1.5f * (tick < shooter.MegaBulletUntilTick ? 1.8f : 1f);
+                            shooter.Velocity -= direction * (reflectedImpulse * 0.5f / MassScale(shooter.Archetype));
+                        }
+                        else if (deflectedBySpinner)
+                        {
+                            shooter.Velocity -= direction * (1.2f / MassScale(shooter.Archetype));
+                        }
+                        else
+                        {
+                            var damage = 34f;
+                            target.Health = MathF.Max(0f, target.Health - damage);
+                            var targetImpulse = 1.5f;
+                            if (tick < shooter.MegaBulletUntilTick) targetImpulse *= 1.8f;
+                            target.Velocity += direction * (targetImpulse / MassScale(target.Archetype));
+                            if (target.Health <= 0f) Eliminate(target, shooter);
+                        }
+                    }
+
+                    shotSegments.Add(new RealtimeShotSegment(shotId, shooter.PlayerId, segmentIndex, segmentIndex,
+                        spinnerLaser ? "RicochetLaser" : "BumperPulse", origin, endpoint,
+                        target?.PlayerId ?? 0, target is not null && !blockedByShield && !deflectedBySpinner,
+                        blockedByShield, deflectedBySpinner));
+
+                    if (target is not null)
+                    {
+                        if ((!blockedByShield && !deflectedBySpinner) || !spinnerLaser || segmentIndex >= maxBounces) break;
+                        direction *= -1f;
+                        remainingRange -= nearestDistance;
+                        origin = endpoint + direction * 0.05f;
+                        segmentIndex++;
+                        continue;
+                    }
+
+                    remainingRange -= segmentLimit;
+                    if (wallDistance > segmentLimit + 0.001f || segmentIndex >= maxBounces) break;
+                    if (reflectX) direction = new WireVector(-direction.X, direction.Y);
+                    if (reflectY) direction = new WireVector(direction.X, -direction.Y);
+                    origin = endpoint + direction * 0.05f;
+                    segmentIndex++;
                 }
-                if (target is null) continue;
-                var damage = tick < target.ShieldUntilTick ? 12f : 34f;
-                target.Health = MathF.Max(0f, target.Health - damage);
-                var targetMass = MassScale(target.Archetype);
-                var targetImpulse = tick < target.ShieldUntilTick ? 0.8f : 1.5f;
-                if (tick < shooter.MegaBulletUntilTick) targetImpulse *= 1.8f;
-                target.Velocity += direction * (targetImpulse / targetMass);
-                if (target.Health <= 0f) Eliminate(target, shooter);
             }
+        }
+
+        private static void GetBoundaryDistance(WireVector origin, WireVector direction, ArenaBounds bounds,
+            out float distance, out bool reflectX, out bool reflectY)
+        {
+            var distanceX = MathF.Abs(direction.X) < 0.0001f
+                ? float.PositiveInfinity
+                : (direction.X > 0f ? bounds.HalfWidth - origin.X : -bounds.HalfWidth - origin.X) / direction.X;
+            var distanceY = MathF.Abs(direction.Y) < 0.0001f
+                ? float.PositiveInfinity
+                : (direction.Y > 0f ? bounds.HalfHeight - origin.Y : -bounds.HalfHeight - origin.Y) / direction.Y;
+            distanceX = distanceX >= 0f ? distanceX : float.PositiveInfinity;
+            distanceY = distanceY >= 0f ? distanceY : float.PositiveInfinity;
+            distance = MathF.Min(distanceX, distanceY);
+            if (float.IsInfinity(distance)) distance = float.MaxValue;
+            reflectX = MathF.Abs(distanceX - distance) < 0.001f;
+            reflectY = MathF.Abs(distanceY - distance) < 0.001f;
         }
 
         private void ResolvePickups(TimeSpan matchElapsed)
@@ -1046,6 +1136,9 @@ public sealed class RealtimeMatchHub : IDisposable
     }
 
     private readonly record struct RealtimeInput(int Tick, WireVector Movement, WireVector Aim, bool Fire, bool Ability);
+    private sealed record RealtimeShotSegment(int ShotId, int OwnerPlayerId, int SegmentIndex, int BounceIndex,
+        string Type, WireVector Start, WireVector End, int HitPlayerId, bool Hit, bool ShieldBlocked,
+        bool DeflectedBySpinner);
     private readonly record struct ArenaBounds(float HalfWidth, float HalfHeight);
     private readonly record struct WireVector(float X, float Y)
     {

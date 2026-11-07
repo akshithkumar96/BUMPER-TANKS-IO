@@ -36,6 +36,7 @@ namespace BumperTanks.Gameplay
         private int onlineGemCount;
         private int onlineMatchAward;
         private int appliedPickupTick = -1;
+        private int appliedShotTick = -1;
         private float onlineRemainingSeconds;
         private string onlinePhase = string.Empty;
         private bool onlineMatch;
@@ -64,6 +65,7 @@ namespace BumperTanks.Gameplay
             realtime.RoomJoined += OnRealtimeRoomJoined;
             realtime.SnapshotReceived += OnRealtimeSnapshot;
             realtime.PickupFrameReceived += OnRealtimePickupFrame;
+            realtime.ShotFrameReceived += OnRealtimeShotFrame;
             realtime.MatchReceiptReceived += OnRealtimeMatchReceipt;
             realtime.Error += OnRealtimeError;
             realtime.Disconnected += OnRealtimeDisconnected;
@@ -398,6 +400,32 @@ namespace BumperTanks.Gameplay
             view.NitroActive = snapshot.NitroActive;
             view.MegaBulletActive = snapshot.MegaBulletActive;
             view.MagnetActive = snapshot.MagnetActive;
+        }
+
+        private void OnRealtimeShotFrame(RealtimeShotFrame frame)
+        {
+            if (!onlineMatch || frame.Tick <= appliedShotTick) return;
+            appliedShotTick = frame.Tick;
+            foreach (var shot in frame.Traces)
+            {
+                var visual = new GameObject("Online Shot Trace");
+                var line = visual.AddComponent<LineRenderer>();
+                line.positionCount = 2;
+                line.useWorldSpace = true;
+                line.startWidth = 0.065f;
+                line.endWidth = 0.025f;
+                line.material = new Material(Shader.Find("Sprites/Default"));
+                var color = shot.ShieldBlocked ? new Color(1f, 0.35f, 0.15f, 0.95f) :
+                    shot.Deflected ? new Color(0.4f, 1f, 0.45f, 0.95f) :
+                    shot.Type == "RicochetLaser" ? new Color(0.95f, 0.2f, 0.9f, 0.9f) : new Color(0.25f, 0.85f, 1f, 0.9f);
+                line.startColor = color;
+                line.endColor = new Color(color.r, color.g, color.b, 0.1f);
+                line.sortingOrder = 20;
+                line.SetPosition(0, new Vector3(shot.Start.x, shot.Start.y, -0.1f));
+                line.SetPosition(1, new Vector3(shot.End.x, shot.End.y, -0.1f));
+                Destroy(visual, 0.14f);
+                Destroy(line.material, 0.16f);
+            }
         }
 
         private void OnRealtimePickupFrame(RealtimePickupFrame frame)

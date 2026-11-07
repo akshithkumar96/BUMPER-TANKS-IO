@@ -93,7 +93,9 @@ class WebSocketClient:
         if mask:
             payload = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
         if opcode == 8:
-            return {"type": "close"}
+            code = struct.unpack("!H", payload[:2])[0] if len(payload) >= 2 else None
+            reason = payload[2:].decode("utf-8", errors="replace") if len(payload) > 2 else ""
+            return {"type": "close", "code": code, "reason": reason}
         if opcode == 9:
             self._send_control(10, payload)
             return self._receive_frame()
@@ -244,6 +246,50 @@ def clear_shot_target(snapshot, shooter_id):
     return min(candidates, key=lambda item: item[0])[1]
 
 
+def clear_three_bounce_aim(snapshot, shooter_id):
+    shooter = next(player for player in snapshot["players"] if player["playerId"] == shooter_id)
+    origin = shooter["position"]
+    targets = [player["position"] for player in snapshot["players"]
+               if player["playerId"] != shooter_id and player.get("alive")]
+    for degree in range(360):
+        angle = math.radians(degree)
+        dx, dy = math.cos(angle), math.sin(angle)
+        aim_x, aim_y = dx, dy
+        x, y, remaining = origin["x"], origin["y"], 48.0
+        segments = 0
+        blocked = False
+        while segments < 4 and remaining > 0.05:
+            tx = ((7.4 - x) / dx if dx > 0 else (-7.4 - x) / dx) if abs(dx) > 0.0001 else math.inf
+            ty = ((5.4 - y) / dy if dy > 0 else (-5.4 - y) / dy) if abs(dy) > 0.0001 else math.inf
+            tx = tx if tx >= 0 else math.inf
+            ty = ty if ty >= 0 else math.inf
+            wall = min(tx, ty)
+            length = min(remaining, wall)
+            for target in targets:
+                ox, oy = target["x"] - x, target["y"] - y
+                along = ox * dx + oy * dy
+                perpendicular = abs(ox * dy - oy * dx)
+                if 0.2 <= along <= length and perpendicular <= 0.55:
+                    blocked = True
+                    break
+            if blocked:
+                break
+            x, y = x + dx * length, y + dy * length
+            remaining -= length
+            segments += 1
+            if wall > length + 0.001 or segments == 4:
+                break
+            if abs(tx - wall) < 0.001:
+                dx = -dx
+            if abs(ty - wall) < 0.001:
+                dy = -dy
+            x += dx * 0.05
+            y += dy * 0.05
+        if not blocked and segments == 4:
+            return aim_x, aim_y
+    raise AssertionError("No clear path for a three-bounce Spinner laser")
+
+
 def fire_until_hit(client, snapshot, shooter_id, target_id, previous_health, last_client_tick):
     """Keep aim updated against the moving authoritative bots until a shot lands."""
     deadline = time.monotonic() + 3
@@ -370,7 +416,7 @@ def main():
         assert rejection["code"] == "invalid_input", rejection
 
         second.send({
-            "type": "input", "tick": 20,
+            "type": "input", "tick": 22,
             "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
             "fire": False, "ability": True,
         })
@@ -378,6 +424,49 @@ def main():
                                 next((player["shielded"] for player in message["players"]
                                       if player["playerId"] == second_join["playerId"]), False))
         assert next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])["shielded"], heavy_shield
+
+        # Heavy's three-second shield faces its latest aim and reflects a front shot.
+        shooter_state = next(player for player in heavy_shield["players"] if player["playerId"] == first_join["playerId"])
+        heavy_state = next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])
+        dx = shooter_state["position"]["x"] - heavy_state["position"]["x"]
+        dy = shooter_state["position"]["y"] - heavy_state["position"]["y"]
+        aim_length = max(0.0001, math.hypot(dx, dy))
+        time.sleep(0.05)  # Leave margin under the server's per-player input rate limit.
+        second.send({"type": "input", "tick": 23, "movement": {"x": 0, "y": 0},
+                     "aim": {"x": dx / aim_length, "y": dy / aim_length}, "fire": False, "ability": True})
+        facing_shield = wait_for(second, lambda message: message.get("type") == "snapshot" and
+                                 message.get("tick", 0) > heavy_shield["tick"] and
+                                 next((player["shielded"] for player in message["players"]
+                                       if player["playerId"] == second_join["playerId"]), False))
+        shooter_state = next(player for player in facing_shield["players"] if player["playerId"] == first_join["playerId"])
+        heavy_state = next(player for player in facing_shield["players"] if player["playerId"] == second_join["playerId"])
+        dx = heavy_state["position"]["x"] - shooter_state["position"]["x"]
+        dy = heavy_state["position"]["y"] - shooter_state["position"]["y"]
+        aim_length = max(0.0001, math.hypot(dx, dy))
+        time.sleep(0.05)
+        first.send({"type": "input", "tick": last_client_tick + 1, "movement": {"x": 0, "y": 0},
+                    "aim": {"x": dx / aim_length, "y": dy / aim_length}, "fire": True, "ability": False})
+        last_client_tick += 1
+        reflected = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                             any(shot.get("ownerPlayerId") == first_join["playerId"] and
+                                 shot.get("hitPlayerId") == second_join["playerId"] and shot.get("shieldBlocked")
+                                 for shot in message.get("shots", [])), timeout=3)
+        reflected_shot = next(shot for shot in reflected["shots"] if shot["ownerPlayerId"] == first_join["playerId"])
+        assert reflected_shot["shieldBlocked"] and not reflected_shot["hit"], reflected
+        shielded_after_hit = next(player for player in reflected["players"] if player["playerId"] == second_join["playerId"])
+        assert shielded_after_hit["health"] == heavy_state["health"], reflected
+
+        # The shield covers only its front arc; a perpendicular shot still damages Heavy.
+        time.sleep(0.05)
+        second.send({"type": "input", "tick": 24, "movement": {"x": 0, "y": 0},
+                     "aim": {"x": -dy / aim_length, "y": dx / aim_length}, "fire": False, "ability": False})
+        side_facing = wait_for(second, lambda message: message.get("type") == "snapshot" and
+                               message.get("tick", 0) > reflected["tick"])
+        before_side_health = next(player["health"] for player in side_facing["players"]
+                                  if player["playerId"] == second_join["playerId"])
+        hit_side, side_target, last_client_tick = fire_until_hit(
+            first, side_facing, first_join["playerId"], second_join["playerId"], before_side_health, last_client_tick)
+        assert side_target["health"] < before_side_health, hit_side
 
         spinner_id = first_room_player_ids[2]
         spinner = clients[2]
@@ -390,6 +479,21 @@ def main():
                              next((player.get("whirling", False) for player in message["players"]
                                    if player["playerId"] == spinner_id), False))
         assert next(player for player in whirlwind["players"] if player["playerId"] == spinner_id)["archetype"] == "RicochetSpinner", whirlwind
+        laser_aim = clear_three_bounce_aim(whirlwind, spinner_id)
+        spinner.send({
+            "type": "input", "tick": spinner_last_client_tick + 2,
+            "movement": {"x": 0, "y": 0}, "aim": {"x": laser_aim[0], "y": laser_aim[1]},
+            "fire": True, "ability": False,
+        })
+        spinner_laser = wait_for(spinner, lambda message: message.get("type") == "snapshot" and
+                                 any(shot.get("ownerPlayerId") == spinner_id and shot.get("type") == "RicochetLaser"
+                                     for shot in message.get("shots", [])))
+        laser_id = next(shot["shotId"] for shot in spinner_laser["shots"] if shot["ownerPlayerId"] == spinner_id)
+        laser_segments = sorted((shot for shot in spinner_laser["shots"] if shot["shotId"] == laser_id),
+                                key=lambda shot: shot["segmentIndex"])
+        assert len(laser_segments) == 4, spinner_laser
+        assert [shot["segmentIndex"] for shot in laser_segments] == [0, 1, 2, 3], spinner_laser
+        assert [shot["bounceIndex"] for shot in laser_segments] == [0, 1, 2, 3], spinner_laser
 
         dash_tick = last_client_tick + 1
         first.send({

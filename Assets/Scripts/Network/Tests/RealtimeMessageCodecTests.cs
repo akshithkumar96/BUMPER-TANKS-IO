@@ -172,6 +172,33 @@ namespace BumperTanks.Network.Tests
         }
 
         [Test]
+        public void SnapshotParsesShieldAndSpinnerShotSegments()
+        {
+            const string json = "{\"type\":\"snapshot\",\"tick\":12,\"players\":[],\"shots\":[" +
+                "{\"shotId\":7,\"ownerPlayerId\":2,\"segmentIndex\":0,\"bounceIndex\":0,\"type\":\"RicochetLaser\",\"start\":{\"x\":0,\"y\":0},\"end\":{\"x\":1,\"y\":0},\"hitPlayerId\":0,\"hit\":false,\"shieldBlocked\":false}," +
+                "{\"shotId\":7,\"ownerPlayerId\":2,\"segmentIndex\":1,\"bounceIndex\":1,\"type\":\"RicochetLaser\",\"start\":{\"x\":1,\"y\":0},\"end\":{\"x\":0,\"y\":0},\"hitPlayerId\":3,\"hit\":false,\"shieldBlocked\":true}," +
+                "{\"shotId\":8,\"ownerPlayerId\":4,\"segmentIndex\":0,\"bounceIndex\":0,\"type\":\"BumperPulse\",\"start\":{\"x\":0,\"y\":1},\"end\":{\"x\":0,\"y\":0},\"hitPlayerId\":-3,\"hit\":false,\"shieldBlocked\":false,\"deflected\":true}]}";
+
+            Assert.That(RealtimeMessageCodec.TryReadSnapshotFrame(json, out _, out _, out _, out _, out var shots), Is.True);
+            Assert.That(shots.Length, Is.EqualTo(3));
+            Assert.That(shots[1].BounceIndex, Is.EqualTo(1));
+            Assert.That(shots[1].ShieldBlocked, Is.True);
+            Assert.That(shots[1].Hit, Is.False);
+            Assert.That(shots[2].Deflected, Is.True);
+        }
+
+        [Test]
+        public void SnapshotRejectsDuplicateOrNonFiniteShotSegments()
+        {
+            const string item = "{\"shotId\":7,\"ownerPlayerId\":2,\"segmentIndex\":0,\"bounceIndex\":0,\"type\":\"BumperPulse\",\"start\":{\"x\":0,\"y\":0},\"end\":{\"x\":1,\"y\":0},\"hitPlayerId\":0,\"hit\":false,\"shieldBlocked\":false}";
+            var duplicate = "{\"type\":\"snapshot\",\"tick\":1,\"players\":[],\"shots\":[" + item + "," + item + "]}";
+            var nonFinite = duplicate.Replace("{\"x\":1,\"y\":0}", "{\"x\":NaN,\"y\":0}").Replace("," + item, string.Empty);
+
+            Assert.That(RealtimeMessageCodec.TryReadSnapshotFrame(duplicate, out _, out _, out _, out _, out _), Is.False);
+            Assert.That(RealtimeMessageCodec.TryReadSnapshotFrame(nonFinite, out _, out _, out _, out _, out _), Is.False);
+        }
+
+        [Test]
         public void ServerErrorCodeIsExposedWhenNoHumanReadableMessageExists()
         {
             Assert.That(RealtimeMessageCodec.ReadError("{\"type\":\"error\",\"code\":\"player_already_connected\"}"),

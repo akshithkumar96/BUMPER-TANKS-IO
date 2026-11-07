@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using BumperTanks.Match;
 using UnityEngine;
 
@@ -60,11 +61,16 @@ namespace BumperTanks.Network
 
         public static bool TryReadSnapshotFrame(string json, out int tick, out TankSnapshot[] snapshots,
             out GemPickupSnapshot[] gems, out PowerUpPickupSnapshot[] powerUps)
+            => TryReadSnapshotFrame(json, out tick, out snapshots, out gems, out powerUps, out _);
+
+        public static bool TryReadSnapshotFrame(string json, out int tick, out TankSnapshot[] snapshots,
+            out GemPickupSnapshot[] gems, out PowerUpPickupSnapshot[] powerUps, out RealtimeShotTrace[] shots)
         {
             tick = -1;
             snapshots = Array.Empty<TankSnapshot>();
             gems = Array.Empty<GemPickupSnapshot>();
             powerUps = Array.Empty<PowerUpPickupSnapshot>();
+            shots = Array.Empty<RealtimeShotTrace>();
             var data = JsonUtility.FromJson<RealtimeSnapshotMessage>(json);
             if (data == null || data.type != "snapshot" || data.tick < 0 || data.players == null ||
                 !Finite(data.elapsedSeconds) || !Finite(data.remainingSeconds)) return false;
@@ -76,7 +82,8 @@ namespace BumperTanks.Network
                     data.arenaBounds.halfWidth <= 0f || data.arenaBounds.halfHeight <= 0f) return false;
                 arenaSize = new Vector2(data.arenaBounds.halfWidth * 2f, data.arenaBounds.halfHeight * 2f);
             }
-            if (!TryReadGemPickups(data.gems, out gems) || !TryReadPowerUpPickups(data.powerUps, out powerUps)) return false;
+            if (!TryReadGemPickups(data.gems, out gems) || !TryReadPowerUpPickups(data.powerUps, out powerUps) ||
+                !TryReadShots(data.shots, out shots)) return false;
             var hasAliveState = json.IndexOf("\"alive\"", StringComparison.Ordinal) >= 0;
             var parsed = new TankSnapshot[data.players.Length];
             for (var index = 0; index < data.players.Length; index++)
@@ -95,6 +102,31 @@ namespace BumperTanks.Network
             }
             tick = data.tick;
             snapshots = parsed;
+            return true;
+        }
+
+        private static bool TryReadShots(RealtimeShotMessage[] messages, out RealtimeShotTrace[] shots)
+        {
+            shots = Array.Empty<RealtimeShotTrace>();
+            if (messages == null) return true;
+            if (messages.Length > 64) return false;
+            var parsed = new RealtimeShotTrace[messages.Length];
+            var shotSegments = new HashSet<(int ShotId, int SegmentIndex)>();
+            foreach (var pair in messages.Select((message, index) => (message, index)))
+            {
+                var item = pair.message;
+                if (item == null || item.shotId <= 0 || item.ownerPlayerId == 0 || item.segmentIndex is < 0 or > 3 ||
+                    item.bounceIndex is < 0 or > 3 || item.start == null || item.end == null ||
+                    !Finite(item.start.x) || !Finite(item.start.y) || !Finite(item.end.x) || !Finite(item.end.y) ||
+                    item.type is not ("BumperPulse" or "RicochetLaser") ||
+                    !shotSegments.Add((item.shotId, item.segmentIndex)) ||
+                    (item.hit && item.hitPlayerId == 0) ||
+                    ((item.shieldBlocked || item.deflected) && (item.hit || item.hitPlayerId == 0))) return false;
+                parsed[pair.index] = new RealtimeShotTrace(item.shotId, item.ownerPlayerId, item.segmentIndex,
+                    item.bounceIndex, item.type, new Vector2(item.start.x, item.start.y), new Vector2(item.end.x, item.end.y),
+                    item.hitPlayerId, item.hit, item.shieldBlocked, item.deflected);
+            }
+            shots = parsed;
             return true;
         }
 

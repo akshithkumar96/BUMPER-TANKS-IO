@@ -32,6 +32,7 @@ namespace BumperTanks.Network
         public event Action<TankSnapshot> SnapshotReceived;
         public event Action<RealtimePickupFrame> PickupFrameReceived;
         public event Action<RealtimeMatchReceipt> MatchReceiptReceived;
+        public event Action<RealtimeShotFrame> ShotFrameReceived;
         public event Action<RealtimeRoomJoined> RoomJoined;
         public event Action<string> Error;
         public event Action Disconnected;
@@ -279,10 +280,11 @@ namespace BumperTanks.Network
                 }
                 case "snapshot":
                 {
-                    if (!RealtimeMessageCodec.TryReadSnapshotFrame(json, out var tick, out var snapshots, out var gems, out var powerUps))
+                    if (!RealtimeMessageCodec.TryReadSnapshotFrame(json, out var tick, out var snapshots, out var gems, out var powerUps, out var shots))
                         throw new FormatException("Snapshot contains invalid tick/player state.");
                     if (tick < latestSnapshotTick) return;
                     PickupFrameReceived?.Invoke(new RealtimePickupFrame(tick, gems, powerUps));
+                    ShotFrameReceived?.Invoke(new RealtimeShotFrame(tick, shots));
                     foreach (var snapshot in snapshots)
                     {
                         if (snapshot.Tick < latestSnapshotTick) continue;
@@ -485,6 +487,7 @@ namespace BumperTanks.Network
         public RealtimeArenaBounds arenaBounds;
         public RealtimeGemPickupMessage[] gems;
         public RealtimePowerUpPickupMessage[] powerUps;
+        public RealtimeShotMessage[] shots;
         public RealtimeSnapshotPlayer[] players;
     }
     [Serializable] internal sealed class RealtimeArenaBounds { public float halfWidth; public float halfHeight; }
@@ -499,6 +502,20 @@ namespace BumperTanks.Network
         public int pickupId;
         public string type;
         public RealtimeVector position;
+    }
+    [Serializable] internal sealed class RealtimeShotMessage
+    {
+        public int shotId;
+        public int ownerPlayerId;
+        public int segmentIndex;
+        public int bounceIndex;
+        public string type;
+        public RealtimeVector start;
+        public RealtimeVector end;
+        public int hitPlayerId;
+        public bool hit;
+        public bool shieldBlocked;
+        public bool deflected;
     }
     [Serializable] internal sealed class RealtimeSnapshotPlayer
     {
