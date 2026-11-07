@@ -119,6 +119,7 @@ Server/__pycache__/
 
 # LevelPlay generates these dependency catalogs in the project Assets folder.
 /Assets/LevelPlay/
+/Assets/LevelPlay.meta
 
 # Standalone ASP.NET service project (Unity's global rule ignores all csproj files)
 !/Server/BumperTanks.Server.csproj
