@@ -3,7 +3,7 @@
 The project exposes repeatable Unity command-line build entry points through `BumperTanksBuildEntrypoint`:
 
 - `BuildWindowsDevelopment` creates `Build/StandaloneWindows64Development/BumperTanksIO.exe`.
-- `BuildWebGlDevelopment` creates `Build/WebGLDevelopment` when the Unity WebGL module is installed.
+- `BuildWebGlDevelopment` creates the browser player at `Build/WebGLDevelopment/BumperTanksIO/index.html` when the Unity WebGL module is installed.
 - `BuildWindowsRelease` and `BuildWebGlRelease` require valid HTTPS/WSS values in `Assets/Resources/ServiceEndpointSettings.asset` before building.
 
 Run a Windows development build from the repository root:
@@ -17,3 +17,5 @@ Run a Windows development build from the repository root:
 ```
 
 Development builds use the local service defaults unless a realtime PlayerPrefs override is configured. Release build endpoints are described in [deployment-endpoints.md](deployment-endpoints.md). Player build output is ignored under `Build/` and is not committed.
+
+The WebGL Development player was built successfully with Unity 6000.3.8f1 at `Build/WebGLDevelopment/BumperTanksIO` (108 MiB BuildReport). Serve this directory through an HTTP server to run it in a browser; opening `index.html` directly from disk does not provide the required WebAssembly fetch behavior. Browser and device gameplay QA is still pending.

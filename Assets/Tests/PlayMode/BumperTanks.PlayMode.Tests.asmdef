@@ -1,0 +1,15 @@
+{
+  "name": "BumperTanks.PlayMode.Tests",
+  "rootNamespace": "BumperTanks.Tests",
+  "references": ["BumperTanks.Core", "BumperTanks.Match", "BumperTanks.Gameplay"],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": ["TestAssemblies"]
+}

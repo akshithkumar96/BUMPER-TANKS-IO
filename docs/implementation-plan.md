@@ -26,7 +26,7 @@ Implement a local playable arena with the three GDD archetypes, virtual joystick
 
 Acceptance criteria: each tank is controllable; a released shot applies recoil; collision response differs by mass; flank hits apply 1.5x knockback; ability cooldown behavior is tested.
 
-Status: in progress. The runtime arena, keyboard/mouse/touch controls, aim trajectory, mass-scaled bump physics, archetype-tuned weapons, bouncing spinner disc, projectile recoil, flank knockback, power-ups, scoring, and GDD-aligned abilities are implemented. Play Mode verification remains.
+Status: in progress. The runtime arena, keyboard/mouse/touch controls, aim trajectory, mass-scaled bump physics, archetype-tuned weapons, bouncing spinner disc, projectile recoil, flank knockback, power-ups, scoring, and GDD-aligned abilities are implemented. Play Mode tests now exercise Rigidbody2D tank movement/speed bounds and match phase/authoritative arena bounds; visual gameplay and device QA remain.
 
 ## Module 3 Match Director and Bots
 
@@ -34,7 +34,7 @@ Add a 90-120 second state machine: broad arena/power-ups, 5-second tile collapse
 
 Acceptance criteria: match phases transition at their defined times; arena changes are deterministic; a bot can seek targets and power-ups; a match ends with a winner.
 
-Status: the 90-second phase schedule, shared arena bounds, centered 3×3 sudden-death zone, five-second boundary warnings, out-of-bounds pickup cleanup, phase gem multiplier, phase knockback multiplier, and 2.5-second bot fill are implemented. Bots seek pickup items, target opponents, fire, use archetype abilities, and steer clear of shrinking boundaries. Matches now end on a sole survivor or at the time limit, resolve time-limit standings by survival, gems, eliminations, and remaining health, then submit the local player result once. Collected power-ups respawn after 12 seconds inside the current arena bounds. Play Mode verification remains.
+Status: the 90-second phase schedule, shared arena bounds, centered 3×3 sudden-death zone, five-second boundary warnings, out-of-bounds pickup cleanup, phase gem multiplier, phase knockback multiplier, and 2.5-second bot fill are implemented. Bots seek pickup items, target opponents, fire, use archetype abilities, and steer clear of shrinking boundaries. Matches now end on a sole survivor or at the time limit, resolve time-limit standings by survival, gems, eliminations, and remaining health, then submit the local player result once. Collected power-ups respawn after 12 seconds inside the current arena bounds. Play Mode tests verify the match director applies server-authoritative phase and bounds state; full local match, visual, and device QA remain.
 
 ## Module 4 Multiplayer
 

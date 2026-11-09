@@ -116,7 +116,7 @@ namespace BumperTanks.Gameplay
 
         private void ApplyArenaSize()
         {
-            Bounds = MatchRules.BoundsAt(Elapsed);
+            if (!networkAuthoritative) Bounds = MatchRules.BoundsAt(Elapsed);
             foreach (var tank in FindObjectsByType<TankController2D>(FindObjectsSortMode.None))
             {
                 var point = tank.transform.position;
