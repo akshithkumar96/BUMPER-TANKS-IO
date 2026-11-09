@@ -6,6 +6,11 @@ builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("reward
     limiter.PermitLimit = 60;
     limiter.Window = TimeSpan.FromMinutes(1);
     limiter.QueueLimit = 0;
+}).AddFixedWindowLimiter("crash-reports", limiter =>
+{
+    limiter.PermitLimit = 10;
+    limiter.Window = TimeSpan.FromMinutes(1);
+    limiter.QueueLimit = 0;
 }));
 builder.Services.Configure<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>(options =>
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests);
@@ -16,7 +21,8 @@ var app = builder.Build();
 var profiles = new ProfileRepository(builder.Configuration);
 var identities = new PlayerIdentityRepository(builder.Configuration);
 var telemetry = new TelemetryRepository(builder.Configuration);
-var realtime = new RealtimeMatchHub(identities, profiles);
+var crashReports = new CrashReportRepository(builder.Configuration);
+var realtime = new RealtimeMatchHub(identities, profiles, app.Configuration);
 var attestationSecret = builder.Configuration["Rewards:MatchAttestationSecret"];
 var requireMatchAttestation = bool.TryParse(builder.Configuration["Rewards:RequireMatchAttestation"], out var configuredAttestationRequirement)
     ? configuredAttestationRequirement
@@ -161,6 +167,17 @@ app.MapPost("/v1/telemetry", (TelemetryRequest request, HttpRequest httpRequest)
     return Results.Accepted();
 }).RequireRateLimiting("rewards");
 
+app.MapPost("/v1/crash-reports", (CrashReportRequest request, HttpRequest httpRequest) =>
+{
+    if (!TryGetAuthenticatedPlayer(identities, httpRequest, out var authenticatedPlayerId)) return Results.Unauthorized();
+    if (!string.Equals(request.PlayerId, authenticatedPlayerId, StringComparison.Ordinal)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!RequestValidation.IsPlayerId(request.PlayerId) || !RequestValidation.IsCrashFingerprint(request.Fingerprint)
+        || !RequestValidation.IsCrashBuildVersion(request.BuildVersion) || !RequestValidation.IsCrashPlatform(request.Platform))
+        return Results.BadRequest(new { error = "invalid crash report" });
+    var inserted = crashReports.Record(request.PlayerId, request.Fingerprint.ToLowerInvariant(), request.BuildVersion, request.Platform, DateTimeOffset.UtcNow);
+    return Results.Accepted(value: new { duplicate = !inserted });
+}).RequireRateLimiting("crash-reports");
+
 app.MapGet("/v1/leaderboard", () => Results.Ok(new LeaderboardResponse(profiles.All.OrderByDescending(profile => profile.BattleCoins).Take(50).ToArray())));
 app.Run();
 
@@ -184,5 +201,6 @@ public sealed record CosmeticPurchaseResponse(PlayerProfile Profile, string Cosm
 public sealed record CosmeticCatalogResponse(CosmeticDefinition[] Items);
 public sealed record MatchCompleteRequest(string PlayerId, string MatchId, int Gems, int Eliminations);
 public sealed record TelemetryRequest(string PlayerId, string Name);
+public sealed record CrashReportRequest(string PlayerId, string Fingerprint, string BuildVersion, string Platform);
 public sealed record LeaderboardResponse(PlayerProfile[] Entries);
 public sealed record AnonymousIdentityResponse(string PlayerId, string AccessToken);

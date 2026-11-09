@@ -23,13 +23,18 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet build BumperTanks.Server.csproj --configuration Release
       - run: dotnet build ../Tests/AdRewardRepositorySmoke/AdRewardRepositorySmoke.csproj --configuration Release
+      - run: dotnet build ../Tests/CrashReportRepositorySmoke/CrashReportRepositorySmoke.csproj --configuration Release
+      - run: dotnet run --no-build --configuration Release --project ../Tests/CrashReportRepositorySmoke/CrashReportRepositorySmoke.csproj
       - name: Start service and verify health and rewards
         run: |
           set -euo pipefail
           export Storage__ProfilePath="$RUNNER_TEMP/bumper-profiles.json"
           export Storage__IdentityPath="$RUNNER_TEMP/bumper-identities.json"
           export Storage__TelemetryPath="$RUNNER_TEMP/bumper-telemetry.json"
+          export Storage__CrashReportPath="$RUNNER_TEMP/bumper-crash-reports.json"
           export ASPNETCORE_ENVIRONMENT=Production
+          export Realtime__DisconnectGraceSeconds=2
+          export REALTIME_DISCONNECT_GRACE_SECONDS=2
           export Rewards__RequireMatchAttestation=true
           export Rewards__MatchAttestationSecret=ci-only-match-attestation-secret-32-bytes-minimum
           export Rewards__LevelPlayPrivateKey=ci-only-levelplay-reward-signing-key
@@ -41,6 +46,7 @@ jobs:
           test "$healthy" = true
           python3 realtime_smoke.py http://127.0.0.1:5188
           python3 ad_reward_smoke.py http://127.0.0.1:5188
+          python3 crash_report_smoke.py http://127.0.0.1:5188
           identity=$(curl --fail --silent --show-error -X POST http://127.0.0.1:5188/v1/identity/anonymous)
           player_id=$(echo "$identity" | jq -r '.playerId')
           player_token=$(echo "$identity" | jq -r '.accessToken')

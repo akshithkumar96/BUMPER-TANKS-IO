@@ -39,6 +39,7 @@ namespace BumperTanks.Frontend
 #if UNITY_ANDROID || UNITY_IOS
             if (GetComponent<LevelPlayRewardedSpinService>() == null) gameObject.AddComponent<LevelPlayRewardedSpinService>();
 #endif
+            if (GetComponent<CrashReporter>() == null) gameObject.AddComponent<CrashReporter>();
             if (EndpointConfigurationValid) StartCoroutine(InitializeIdentity());
         }
 
@@ -159,6 +160,20 @@ namespace BumperTanks.Frontend
             StartCoroutine(PostJson("/v1/telemetry", JsonUtility.ToJson(new Telemetry(playerId, eventName)), null));
         }
 
+        public void SubmitCrashReport(string fingerprint, string buildVersion, string platform)
+        {
+            if (!TelemetryConsentSettings.IsAllowed || !EndpointConfigurationValid || !IdentityReady) return;
+            StartCoroutine(PostCrashReport(fingerprint, buildVersion, platform));
+        }
+
+        private IEnumerator PostCrashReport(string fingerprint, string buildVersion, string platform)
+        {
+            // Consent may be revoked after the Unity log callback queues this coroutine.
+            if (!TelemetryConsentSettings.IsAllowed || !IdentityReady) yield break;
+            var body = new CrashReport(ProfileStore.GetServerPlayerId(), fingerprint, buildVersion, platform);
+            yield return PostJsonResponse("/v1/crash-reports", JsonUtility.ToJson(body), null, null);
+        }
+
         public void FetchLeaderboard(Action<LeaderboardEntry[]> onComplete, Action<string> onError = null)
         {
             StartCoroutine(GetJson("/v1/leaderboard", json => onComplete?.Invoke(JsonUtility.FromJson<LeaderboardPayload>(json)?.entries ?? Array.Empty<LeaderboardEntry>()), onError));
@@ -254,6 +269,17 @@ namespace BumperTanks.Frontend
             public string PlayerId;
             public string Name;
             public Telemetry(string playerId, string name) => (PlayerId, Name) = (playerId, name);
+        }
+
+        [Serializable]
+        private sealed class CrashReport
+        {
+            public string PlayerId;
+            public string Fingerprint;
+            public string BuildVersion;
+            public string Platform;
+            public CrashReport(string playerId, string fingerprint, string buildVersion, string platform) =>
+                (PlayerId, Fingerprint, BuildVersion, Platform) = (playerId, fingerprint, buildVersion, platform);
         }
 
         [Serializable]
