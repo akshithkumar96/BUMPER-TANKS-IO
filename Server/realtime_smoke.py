@@ -339,17 +339,38 @@ def clear_three_bounce_aim(snapshot, shooter_id):
     raise AssertionError("No clear path for a three-bounce Spinner laser")
 
 
-def fire_until_hit(client, snapshot, shooter_id, target_id, previous_health, last_client_tick):
-    """Keep aim updated against the moving authoritative bots until a shot lands."""
-    deadline = time.monotonic() + 3
+def fire_until_hit(client, snapshot, shooter_id, target_id, last_client_tick, retarget=False):
+    """Keep aim current and confirm the intended live target actually took the shot."""
+    deadline = time.monotonic() + 5
     current = snapshot
     while time.monotonic() < deadline:
+        while True:
+            try:
+                queued = client.messages.get_nowait()
+            except queue.Empty:
+                break
+            if queued.get("type") == "error":
+                raise AssertionError(f"Realtime server rejected smoke input: {queued}")
+            if queued.get("type") == "snapshot" and queued.get("tick", 0) > current.get("tick", 0):
+                current = queued
+
         shooter = next(player for player in current["players"] if player["playerId"] == shooter_id)
-        target = next(player for player in current["players"] if player["playerId"] == target_id)
+        if retarget:
+            try:
+                target = clear_shot_target(current, shooter_id)
+                target_id = target["playerId"]
+            except AssertionError:
+                time.sleep(0.05)
+                continue
+        else:
+            target = next((player for player in current["players"] if player["playerId"] == target_id), None)
+            if target is None or not target.get("alive"):
+                raise AssertionError(f"Combat target {target_id} was eliminated before the shot: {current}")
         aim_x = target["position"]["x"] - shooter["position"]["x"]
         aim_y = target["position"]["y"] - shooter["position"]["y"]
         length = max(0.0001, math.hypot(aim_x, aim_y))
-        input_tick = max(last_client_tick + 1, current["tick"] + 1)
+        health_before_shot = target["health"]
+        input_tick = max(last_client_tick + 1, current["tick"] + 2)
         time.sleep(0.04)  # Leave margin below the server's 60 Hz per-player input limit.
         client.send({
             "type": "input", "tick": input_tick,
@@ -359,10 +380,12 @@ def fire_until_hit(client, snapshot, shooter_id, target_id, previous_health, las
         })
         last_client_tick = input_tick
         current = wait_for(client, lambda message: message.get("type") == "snapshot" and
-                           message.get("tick", 0) > current["tick"], timeout=1)
-        target = next((player for player in current["players"] if player["playerId"] == target_id), None)
-        if target is None or target["health"] < previous_health:
-            return current, target, last_client_tick
+                           message.get("tick", 0) > input_tick, timeout=1)
+        target_after = next((player for player in current["players"] if player["playerId"] == target_id), None)
+        confirmed_hit = any(shot.get("ownerPlayerId") == shooter_id and shot.get("hitPlayerId") == target_id and
+                            shot.get("hit") for shot in current.get("shots", []))
+        if confirmed_hit and target_after is not None and target_after["health"] < health_before_shot:
+            return current, target_after, health_before_shot, last_client_tick
     raise AssertionError(f"Timed out waiting for moving bot to be hit; last snapshot: {current}")
 
 
@@ -438,9 +461,8 @@ def main():
         # Verify a live shot before running the separate 2.5-second bot-fill scenario.
         combat_shooter_id = first_room_player_ids[0]
         target_id = clear_shot_target(moved, combat_shooter_id)["playerId"]
-        previous_health = next(player["health"] for player in moved["players"] if player["playerId"] == target_id)
-        hit, target_state, shooter_last_client_tick = fire_until_hit(
-            first, moved, combat_shooter_id, target_id, previous_health, 19)
+        hit, target_state, previous_health, shooter_last_client_tick = fire_until_hit(
+            first, moved, combat_shooter_id, target_id, 19, retarget=True)
         impulse_speed = math.hypot(target_state["velocity"]["x"], target_state["velocity"]["y"])
         assert target_state["health"] < previous_health and impulse_speed > 0.5, target_state
         last_client_tick = shooter_last_client_tick
@@ -538,8 +560,8 @@ def main():
                                message.get("tick", 0) > reflected["tick"])
         before_side_health = next(player["health"] for player in side_facing["players"]
                                   if player["playerId"] == second_join["playerId"])
-        hit_side, side_target, last_client_tick = fire_until_hit(
-            first, side_facing, first_join["playerId"], second_join["playerId"], before_side_health, last_client_tick)
+        hit_side, side_target, before_side_health, last_client_tick = fire_until_hit(
+            first, side_facing, first_join["playerId"], second_join["playerId"], last_client_tick)
         assert side_target["health"] < before_side_health, hit_side
 
         spinner_id = first_room_player_ids[2]
