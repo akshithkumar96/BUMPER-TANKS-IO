@@ -4,26 +4,54 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'Assets/**'
-      - 'Packages/**'
-      - 'ProjectSettings/**'
-      - 'Tests/**'
-      - '.github/workflows/unity-ci.yml'
+      - "Assets/**"
+      - "Packages/**"
+      - "ProjectSettings/**"
+      - "Tests/**"
+      - ".github/workflows/unity-ci.yml"
   pull_request:
     paths:
-      - 'Assets/**'
-      - 'Packages/**'
-      - 'ProjectSettings/**'
-      - 'Tests/**'
-      - '.github/workflows/unity-ci.yml'
+      - "Assets/**"
+      - "Packages/**"
+      - "ProjectSettings/**"
+      - "Tests/**"
+      - ".github/workflows/unity-ci.yml"
 
 concurrency:
   group: unity-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  unity-ci-gate:
+    name: Check Unity CI configuration
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Check opt-in and Unity license
+        id: gate
+        shell: bash
+        env:
+          UNITY_CI_ENABLED: ${{ vars.UNITY_CI_ENABLED }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        run: |
+          if [[ "$UNITY_CI_ENABLED" != "true" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Unity tests and player builds skipped. Set repository variable UNITY_CI_ENABLED=true and add the UNITY_LICENSE Actions secret to enable them." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ -z "$UNITY_LICENSE" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Unity tests and player builds skipped. UNITY_CI_ENABLED is true, but the UNITY_LICENSE Actions secret is not configured." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "Unity CI is enabled; Edit Mode and Play Mode tests and player builds will run." >> "$GITHUB_STEP_SUMMARY"
+
   unity-tests:
     name: Edit Mode and Play Mode tests
+    needs: unity-ci-gate
+    if: needs.unity-ci-gate.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +77,8 @@ jobs:
 
   player-builds:
     name: Build ${{ matrix.name }}
-    needs: unity-tests
+    needs: [unity-ci-gate, unity-tests]
+    if: needs.unity-ci-gate.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -58,11 +87,11 @@ jobs:
           - name: WebGL
             target: WebGL
             method: BumperTanks.Editor.BumperTanksBuildEntrypoint.BuildWebGlDevelopment
-            artifact-path: Build/WebGLDevelopment/BumperTanksIO
+            artifactPath: Build/WebGLDevelopment/BumperTanksIO
           - name: Windows-x64
             target: StandaloneWindows64
             method: BumperTanks.Editor.BumperTanksBuildEntrypoint.BuildWindowsDevelopment
-            artifact-path: Build/StandaloneWindows64Development
+            artifactPath: Build/StandaloneWindows64Development
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,6 +107,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: bumper-tanks-${{ matrix.name }}
-          path: ${{ matrix.artifact-path }}
+          path: ${{ matrix.artifactPath }}
           if-no-files-found: error
           retention-days: 14
