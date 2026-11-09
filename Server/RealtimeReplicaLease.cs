@@ -15,7 +15,11 @@ public sealed class RealtimeReplicaLease : IDisposable
 
     public static RealtimeReplicaLease Acquire(string connectionString)
     {
-        var connection = new NpgsqlConnection(connectionString);
+        // Advisory locks belong to the PostgreSQL session. Disable Npgsql
+        // pooling so disposing this dedicated lifetime connection really ends
+        // its session and releases the lock before an in-process reacquire.
+        var leaseConnectionString = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
+        var connection = new NpgsqlConnection(leaseConnectionString);
         try
         {
             connection.Open();
