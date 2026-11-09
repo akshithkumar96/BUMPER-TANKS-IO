@@ -7,6 +7,16 @@ var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Ga
 if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("Set ConnectionStrings__GameDatabase to run the PostgreSQL integration smoke.");
 
+if (args.Length == 3 && args[0] == "--verify-telemetry")
+{
+    var verifyOptions = new DbContextOptionsBuilder<GameStorageContext>().UseNpgsql(connectionString).Options;
+    using var verifyDb = new GameStorageContext(verifyOptions);
+    if (!verifyDb.TelemetryEvents.Any(item => item.PlayerId == args[1] && item.Name == args[2]))
+        throw new InvalidOperationException($"No PostgreSQL telemetry event '{args[2]}' was found for player '{args[1]}'.");
+    Console.WriteLine($"PostgreSQL telemetry persistence passed for {args[1]} / {args[2]}.");
+    return;
+}
+
 var values = new Dictionary<string, string?>
 {
     ["Storage:Provider"] = "PostgreSQL",
