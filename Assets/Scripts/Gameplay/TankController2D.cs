@@ -116,6 +116,28 @@ namespace BumperTanks.Gameplay
             UpdateAimTrajectory(Input.touchCount > 0 ? aimFingerId >= 0 : Input.GetMouseButton(0));
         }
 
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            if (!hasFocus) ResetTransientInput();
+        }
+
+        private void OnApplicationPause(bool isPaused)
+        {
+            if (isPaused) ResetTransientInput();
+        }
+
+        private void ResetTransientInput()
+        {
+            steering = Vector2.zero;
+            steeringFingerId = -1;
+            aimFingerId = -1;
+            accessibleSteering = Vector2.zero;
+            accessibleSteeringUntil = 0f;
+            pendingNetworkFire = false;
+            pendingNetworkAbility = false;
+            if (aimTrajectory != null) aimTrajectory.enabled = false;
+        }
+
         private void UpdateAimTrajectory(bool aiming)
         {
             if (aimTrajectory == null) return;
