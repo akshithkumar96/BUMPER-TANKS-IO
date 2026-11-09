@@ -1,0 +1,83 @@
+name: Unity CI
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - 'Tests/**'
+      - '.github/workflows/unity-ci.yml'
+  pull_request:
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - 'Tests/**'
+      - '.github/workflows/unity-ci.yml'
+
+concurrency:
+  group: unity-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unity-tests:
+    name: Edit Mode and Play Mode tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: game-ci/unity-test-runner@v4
+        id: tests
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          projectPath: .
+          unityVersion: 6000.3.8f1
+          testMode: all
+          artifactsPath: artifacts
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unity-test-results
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 14
+
+  player-builds:
+    name: Build ${{ matrix.name }}
+    needs: unity-tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: WebGL
+            target: WebGL
+            method: BumperTanks.Editor.BumperTanksBuildEntrypoint.BuildWebGlDevelopment
+            artifact-path: Build/WebGLDevelopment/BumperTanksIO
+          - name: Windows-x64
+            target: StandaloneWindows64
+            method: BumperTanks.Editor.BumperTanksBuildEntrypoint.BuildWindowsDevelopment
+            artifact-path: Build/StandaloneWindows64Development
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: game-ci/unity-builder@v6
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          projectPath: .
+          unityVersion: 6000.3.8f1
+          targetPlatform: ${{ matrix.target }}
+          buildMethod: ${{ matrix.method }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bumper-tanks-${{ matrix.name }}
+          path: ${{ matrix.artifact-path }}
+          if-no-files-found: error
+          retention-days: 14

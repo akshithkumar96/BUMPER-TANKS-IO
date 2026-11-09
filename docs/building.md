@@ -19,3 +19,5 @@ Run a Windows development build from the repository root:
 Development builds use the local service defaults unless a realtime PlayerPrefs override is configured. Release build endpoints are described in [deployment-endpoints.md](deployment-endpoints.md). Player build output is ignored under `Build/` and is not committed.
 
 The WebGL Development player was built successfully with Unity 6000.3.8f1 at `Build/WebGLDevelopment/BumperTanksIO` (108 MiB BuildReport). Serve this directory through an HTTP server to run it in a browser; opening `index.html` directly from disk does not provide the required WebAssembly fetch behavior. Browser and device gameplay QA is still pending.
+
+GitHub Actions workflow `Unity CI` runs Edit Mode and Play Mode tests, then builds WebGL and Windows x64 Development players and uploads the test reports and players as 14-day artifacts. It runs for Unity project changes and can also be started from the Actions tab. Configure the repository Actions secret `UNITY_LICENSE` with the activated Unity 6000.3.8f1 license contents before enabling those runs; the workflow does not store or commit license data.
