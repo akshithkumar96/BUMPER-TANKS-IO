@@ -24,6 +24,19 @@ var values = new Dictionary<string, string?>
 };
 var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 var environment = new SmokeEnvironment { EnvironmentName = Environments.Production };
+using (var lease = RealtimeReplicaLease.Acquire(connectionString))
+{
+    var duplicateRejected = false;
+    try { using var duplicate = RealtimeReplicaLease.Acquire(connectionString); }
+    catch (InvalidOperationException exception) when (exception.Message.Contains("Another realtime server instance", StringComparison.Ordinal))
+    { duplicateRejected = true; }
+    if (!duplicateRejected)
+        throw new InvalidOperationException("A second realtime server acquired the single-instance advisory lease.");
+}
+using (var releasedLease = RealtimeReplicaLease.Acquire(connectionString))
+{
+    // A fresh process can acquire the lease after the prior connection closes.
+}
 var first = GameStorageFactory.Create(configuration, environment);
 var second = GameStorageFactory.Create(configuration, environment);
 
@@ -148,7 +161,7 @@ var retainedCrashReports = second.CrashReports.Snapshot().Where(item => item.Pla
 if (retainedCrashReports.Length != CrashReportRepository.MaxRetainedReports || retainedCrashReports.Any(item => item.Fingerprint == expiredFingerprint))
     throw new InvalidOperationException("PostgreSQL crash report retention did not enforce the 30-day expiry and 1,000-record cap.");
 
-Console.WriteLine("PostgreSQL integration smoke passed: two-store identity, concurrent rewards/purchases, rewarded callback idempotency, telemetry sharing/retention, and crash report dedupe/retention.");
+Console.WriteLine("PostgreSQL integration smoke passed: single realtime replica lease, two-store identity, concurrent rewards/purchases, rewarded callback idempotency, telemetry sharing/retention, and crash report dedupe/retention.");
 
 static async Task<bool[]> ParallelResults(int count, Func<int, bool> action)
 {

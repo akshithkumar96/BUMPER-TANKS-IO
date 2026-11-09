@@ -19,6 +19,13 @@ var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "http://lo
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
 var app = builder.Build();
 var stores = GameStorageFactory.Create(builder.Configuration, builder.Environment);
+var configuredStorageProvider = builder.Configuration["Storage:Provider"]?.Trim();
+var usesPostgresStorage = string.IsNullOrEmpty(configuredStorageProvider)
+    ? !builder.Environment.IsDevelopment()
+    : !string.Equals(configuredStorageProvider, "Json", StringComparison.OrdinalIgnoreCase);
+var realtimeLease = usesPostgresStorage
+    ? RealtimeReplicaLease.Acquire(builder.Configuration.GetConnectionString("GameDatabase")!)
+    : null;
 var profiles = stores.Profiles;
 var identities = stores.Identities;
 var telemetry = stores.Telemetry;
@@ -36,6 +43,11 @@ app.UseWebSockets(new WebSocketOptions
     KeepAliveInterval = TimeSpan.FromSeconds(20)
 });
 app.Lifetime.ApplicationStopping.Register(realtime.Dispose);
+if (realtimeLease is not null)
+{
+    realtimeLease.StartWatchdog(app.Lifetime);
+    app.Lifetime.ApplicationStopping.Register(realtimeLease.Dispose);
+}
 app.Map("/v1/realtime", async context =>
 {
     var origin = context.Request.Headers.Origin.ToString();
