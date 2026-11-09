@@ -554,6 +554,7 @@ def main():
                                    if player["playerId"] == spinner_id), False))
         assert next(player for player in whirlwind["players"] if player["playerId"] == spinner_id)["archetype"] == "RicochetSpinner", whirlwind
         laser_aim = clear_three_bounce_aim(whirlwind, spinner_id)
+        time.sleep(0.05)  # Keep successive inputs under the server's 60 Hz limit.
         spinner.send({
             "type": "input", "tick": spinner_last_client_tick + 2,
             "movement": {"x": 0, "y": 0}, "aim": {"x": laser_aim[0], "y": laser_aim[1]},
