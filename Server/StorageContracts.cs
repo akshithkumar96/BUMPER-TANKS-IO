@@ -17,3 +17,14 @@ public interface IProfileRepository
     bool TryCompleteMatch(string playerId, string matchId, int gems, int eliminations, out PlayerProfile updated, out int award);
     bool TryPurchaseCosmetic(string playerId, string cosmeticId, out PlayerProfile updated, out string error);
 }
+
+public interface ITelemetryRepository
+{
+    void Track(TelemetryEvent telemetryEvent);
+}
+
+public interface ICrashReportRepository
+{
+    bool Record(string playerId, string fingerprint, string buildVersion, string platform, DateTimeOffset now);
+    IReadOnlyList<CrashReportRecord> Snapshot();
+}

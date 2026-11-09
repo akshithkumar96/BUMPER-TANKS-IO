@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 
-public sealed record GameStores(IProfileRepository Profiles, IPlayerIdentityRepository Identities);
+public sealed record GameStores(IProfileRepository Profiles, IPlayerIdentityRepository Identities,
+    ITelemetryRepository Telemetry, ICrashReportRepository CrashReports);
 
 public static class GameStorageFactory
 {
@@ -15,7 +16,8 @@ public static class GameStorageFactory
         {
             if (!environment.IsDevelopment())
                 throw new InvalidOperationException("JSON storage is Development-only. Configure Storage:Provider=PostgreSQL for persistent environments.");
-            return new GameStores(new ProfileRepository(configuration), new PlayerIdentityRepository(configuration));
+            return new GameStores(new ProfileRepository(configuration), new PlayerIdentityRepository(configuration),
+                new TelemetryRepository(configuration), new CrashReportRepository(configuration));
         }
 
         if (!string.Equals(provider, "PostgreSQL", StringComparison.OrdinalIgnoreCase))
@@ -27,6 +29,7 @@ public static class GameStorageFactory
 
         var options = new DbContextOptionsBuilder<GameStorageContext>().UseNpgsql(connectionString).Options;
         using (var db = new GameStorageContext(options)) db.Database.Migrate();
-        return new GameStores(new PostgresProfileRepository(options), new PostgresPlayerIdentityRepository(options));
+        return new GameStores(new PostgresProfileRepository(options), new PostgresPlayerIdentityRepository(options),
+            new PostgresTelemetryRepository(options), new PostgresCrashReportRepository(options));
     }
 }

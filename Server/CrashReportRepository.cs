@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-public sealed class CrashReportRepository
+public sealed class CrashReportRepository : ICrashReportRepository
 {
     public const int MaxRetainedReports = 1000;
     public static readonly TimeSpan Retention = TimeSpan.FromDays(30);
@@ -26,7 +26,8 @@ public sealed class CrashReportRepository
             var existing = reports.FindIndex(item => item.PlayerId == playerId && item.Fingerprint == fingerprint);
             if (existing >= 0)
             {
-                reports[existing] = reports[existing] with { LastSeenUtc = now, Occurrences = Math.Min(reports[existing].Occurrences + 1, int.MaxValue) };
+                var occurrences = reports[existing].Occurrences == int.MaxValue ? int.MaxValue : reports[existing].Occurrences + 1;
+                reports[existing] = reports[existing] with { LastSeenUtc = now, Occurrences = occurrences };
                 Persist();
                 return false;
             }

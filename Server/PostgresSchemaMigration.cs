@@ -51,3 +51,35 @@ public sealed class InitialGameStorage : Migration
         DROP TABLE IF EXISTS profiles;
         """);
 }
+
+[DbContext(typeof(GameStorageContext))]
+[Migration("20261109000200_TelemetryCrashStorage")]
+public sealed class TelemetryCrashStorageMigration : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("""
+        CREATE TABLE telemetry_events (
+            event_id bigserial PRIMARY KEY,
+            name varchar(32) NOT NULL,
+            player_id varchar(32) NOT NULL,
+            occurred_utc timestamp with time zone NOT NULL
+        );
+        CREATE INDEX ix_telemetry_events_occurred_event ON telemetry_events (occurred_utc DESC, event_id DESC);
+        CREATE TABLE crash_reports (
+            report_id bigserial PRIMARY KEY,
+            player_id varchar(32) NOT NULL,
+            fingerprint varchar(64) NOT NULL,
+            build_version varchar(64) NOT NULL,
+            platform varchar(32) NOT NULL,
+            first_seen_utc timestamp with time zone NOT NULL,
+            last_seen_utc timestamp with time zone NOT NULL,
+            occurrences integer NOT NULL,
+            CONSTRAINT uq_crash_reports_player_fingerprint UNIQUE (player_id, fingerprint)
+        );
+        CREATE INDEX ix_crash_reports_last_seen ON crash_reports (last_seen_utc);
+        """);
+
+    protected override void Down(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("""
+        DROP TABLE IF EXISTS crash_reports;
+        DROP TABLE IF EXISTS telemetry_events;
+        """);
+}

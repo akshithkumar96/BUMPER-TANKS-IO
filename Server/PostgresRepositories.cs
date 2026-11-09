@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 
 /// <summary>PostgreSQL-backed identity storage. Only token digests are persisted.</summary>
@@ -221,4 +222,118 @@ public sealed class PostgresProfileRepository(DbContextOptions<GameStorageContex
     private sealed record RewardResult(bool Success, PlayerProfile Profile, int Award);
     private sealed record AdCompletion(bool Success, bool Duplicate, PlayerProfile Profile, int Award);
     private sealed record PurchaseResult(bool Success, PlayerProfile Profile, string Error);
+}
+
+public sealed class PostgresTelemetryRepository(DbContextOptions<GameStorageContext> options) : ITelemetryRepository
+{
+    private const int MaxRetainedEvents = 10000;
+    private const long RetentionLockId = 74199201;
+
+    public void Track(TelemetryEvent telemetryEvent)
+    {
+        using var db = new GameStorageContext(options);
+        using var transaction = db.Database.BeginTransaction();
+        AcquireTransactionLock(db, RetentionLockId);
+        db.TelemetryEvents.Add(new TelemetryEventRow
+        {
+            Name = telemetryEvent.Name,
+            PlayerId = telemetryEvent.PlayerId,
+            OccurredUtc = DateTimeOffset.UtcNow
+        });
+        db.SaveChanges();
+        db.Database.ExecuteSqlInterpolated($"""
+            DELETE FROM telemetry_events
+            WHERE event_id IN (
+                SELECT event_id FROM telemetry_events
+                ORDER BY occurred_utc DESC, event_id DESC
+                OFFSET {MaxRetainedEvents}
+            )
+            """);
+        transaction.Commit();
+    }
+
+    internal static void AcquireTransactionLock(GameStorageContext db, long lockId)
+    {
+        using var command = db.Database.GetDbConnection().CreateCommand();
+        command.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+        command.CommandText = "SELECT pg_advisory_xact_lock(@lock_id)";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "lock_id";
+        parameter.Value = lockId;
+        command.Parameters.Add(parameter);
+        command.ExecuteScalar();
+    }
+}
+
+public sealed class PostgresCrashReportRepository : ICrashReportRepository
+{
+    private const long RetentionLockId = 74199202;
+    private readonly DbContextOptions<GameStorageContext> options;
+
+    public PostgresCrashReportRepository(DbContextOptions<GameStorageContext> options)
+    {
+        this.options = options;
+        PruneExpired(DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>Upserts one player's fingerprint, refreshing its timestamp and count atomically across service instances.</summary>
+    public bool Record(string playerId, string fingerprint, string buildVersion, string platform, DateTimeOffset now)
+    {
+        using var db = new GameStorageContext(options);
+        using var transaction = db.Database.BeginTransaction();
+        PostgresTelemetryRepository.AcquireTransactionLock(db, RetentionLockId);
+        PruneExpired(db, now);
+
+        var existing = db.CrashReports.SingleOrDefault(item => item.PlayerId == playerId && item.Fingerprint == fingerprint);
+        var inserted = existing == null;
+        if (existing == null)
+        {
+            db.CrashReports.Add(new CrashReportRow
+            {
+                PlayerId = playerId,
+                Fingerprint = fingerprint,
+                BuildVersion = buildVersion,
+                Platform = platform,
+                FirstSeenUtc = now,
+                LastSeenUtc = now,
+                Occurrences = 1
+            });
+        }
+        else
+        {
+            existing.LastSeenUtc = now;
+            existing.Occurrences = existing.Occurrences == int.MaxValue ? int.MaxValue : existing.Occurrences + 1;
+        }
+        db.SaveChanges();
+        db.Database.ExecuteSqlInterpolated($"""
+            DELETE FROM crash_reports
+            WHERE report_id NOT IN (
+                SELECT report_id FROM crash_reports ORDER BY report_id DESC LIMIT {CrashReportRepository.MaxRetainedReports}
+            )
+            """);
+        transaction.Commit();
+        return inserted;
+    }
+
+    public IReadOnlyList<CrashReportRecord> Snapshot()
+    {
+        using var db = new GameStorageContext(options);
+        return db.CrashReports.AsNoTracking().OrderBy(item => item.ReportId)
+            .Select(item => new CrashReportRecord(item.PlayerId, item.Fingerprint, item.BuildVersion, item.Platform,
+                item.FirstSeenUtc, item.LastSeenUtc, item.Occurrences)).ToArray();
+    }
+
+    private void PruneExpired(DateTimeOffset now)
+    {
+        using var db = new GameStorageContext(options);
+        using var transaction = db.Database.BeginTransaction();
+        PruneExpired(db, now);
+        transaction.Commit();
+    }
+
+    private static void PruneExpired(GameStorageContext db, DateTimeOffset now)
+    {
+        PostgresTelemetryRepository.AcquireTransactionLock(db, RetentionLockId);
+        db.Database.ExecuteSqlInterpolated($"DELETE FROM crash_reports WHERE last_seen_utc < {now - CrashReportRepository.Retention}");
+    }
 }

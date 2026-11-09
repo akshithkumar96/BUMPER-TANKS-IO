@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 
-public sealed class TelemetryRepository
+public sealed class TelemetryRepository : ITelemetryRepository
 {
     private const int MaxRetainedEvents = 10000;
     private readonly ConcurrentQueue<TelemetryEvent> events = new();

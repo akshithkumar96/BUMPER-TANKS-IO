@@ -7,6 +7,8 @@ public sealed class GameStorageContext(DbContextOptions<GameStorageContext> opti
     public DbSet<CompletedMatchRow> CompletedMatches => Set<CompletedMatchRow>();
     public DbSet<AdSpinChallengeRow> AdSpinChallenges => Set<AdSpinChallengeRow>();
     public DbSet<RewardedAdEventRow> RewardedAdEvents => Set<RewardedAdEventRow>();
+    public DbSet<TelemetryEventRow> TelemetryEvents => Set<TelemetryEventRow>();
+    public DbSet<CrashReportRow> CrashReports => Set<CrashReportRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -62,6 +64,31 @@ public sealed class GameStorageContext(DbContextOptions<GameStorageContext> opti
             entity.Property(row => row.ChallengeId).HasColumnName("challenge_id").HasMaxLength(32);
             entity.HasOne<AdSpinChallengeRow>().WithMany().HasForeignKey(row => row.ChallengeId).OnDelete(DeleteBehavior.Cascade);
         });
+        modelBuilder.Entity<TelemetryEventRow>(entity =>
+        {
+            entity.ToTable("telemetry_events");
+            entity.HasKey(row => row.EventId);
+            entity.Property(row => row.EventId).HasColumnName("event_id").ValueGeneratedOnAdd();
+            entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(32);
+            entity.Property(row => row.PlayerId).HasColumnName("player_id").HasMaxLength(32);
+            entity.Property(row => row.OccurredUtc).HasColumnName("occurred_utc");
+            entity.HasIndex(row => new { row.OccurredUtc, row.EventId });
+        });
+        modelBuilder.Entity<CrashReportRow>(entity =>
+        {
+            entity.ToTable("crash_reports");
+            entity.HasKey(row => row.ReportId);
+            entity.Property(row => row.ReportId).HasColumnName("report_id").ValueGeneratedOnAdd();
+            entity.Property(row => row.PlayerId).HasColumnName("player_id").HasMaxLength(32);
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
+            entity.Property(row => row.BuildVersion).HasColumnName("build_version").HasMaxLength(64);
+            entity.Property(row => row.Platform).HasColumnName("platform").HasMaxLength(32);
+            entity.Property(row => row.FirstSeenUtc).HasColumnName("first_seen_utc");
+            entity.Property(row => row.LastSeenUtc).HasColumnName("last_seen_utc");
+            entity.Property(row => row.Occurrences).HasColumnName("occurrences");
+            entity.HasIndex(row => new { row.PlayerId, row.Fingerprint }).IsUnique();
+            entity.HasIndex(row => row.LastSeenUtc);
+        });
     }
 }
 
@@ -105,4 +132,24 @@ public sealed class RewardedAdEventRow
     public string EventId { get; set; } = string.Empty;
     public string PlayerId { get; set; } = string.Empty;
     public string ChallengeId { get; set; } = string.Empty;
+}
+
+public sealed class TelemetryEventRow
+{
+    public long EventId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string PlayerId { get; set; } = string.Empty;
+    public DateTimeOffset OccurredUtc { get; set; }
+}
+
+public sealed class CrashReportRow
+{
+    public long ReportId { get; set; }
+    public string PlayerId { get; set; } = string.Empty;
+    public string Fingerprint { get; set; } = string.Empty;
+    public string BuildVersion { get; set; } = string.Empty;
+    public string Platform { get; set; } = string.Empty;
+    public DateTimeOffset FirstSeenUtc { get; set; }
+    public DateTimeOffset LastSeenUtc { get; set; }
+    public int Occurrences { get; set; }
 }
