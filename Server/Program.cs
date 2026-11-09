@@ -22,7 +22,8 @@ var profiles = new ProfileRepository(builder.Configuration);
 var identities = new PlayerIdentityRepository(builder.Configuration);
 var telemetry = new TelemetryRepository(builder.Configuration);
 var crashReports = new CrashReportRepository(builder.Configuration);
-var realtime = new RealtimeMatchHub(identities, profiles, app.Configuration);
+var gameplayTuning = GameplayTuningSettings.From(builder.Configuration);
+var realtime = new RealtimeMatchHub(identities, profiles, app.Configuration, gameplayTuning);
 var attestationSecret = builder.Configuration["Rewards:MatchAttestationSecret"];
 var requireMatchAttestation = bool.TryParse(builder.Configuration["Rewards:RequireMatchAttestation"], out var configuredAttestationRequirement)
     ? configuredAttestationRequirement
@@ -46,6 +47,15 @@ app.Map("/v1/realtime", async context =>
 });
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+app.MapGet("/v1/gameplay/tuning", (HttpRequest request, HttpResponse response) =>
+{
+    response.Headers.CacheControl = "public, max-age=60, stale-while-revalidate=300";
+    response.Headers.ETag = gameplayTuning.ETag;
+    if (request.Headers.IfNoneMatch.Any(value => string.Equals(value, gameplayTuning.ETag, StringComparison.Ordinal)))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Ok(gameplayTuning);
+});
 
 app.MapPost("/v1/identity/anonymous", () =>
 {

@@ -20,6 +20,7 @@ namespace BumperTanks.Frontend
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            RemoteGameplayTuning.LoadCached();
             var settings = ServiceEndpointSettings.Load();
             var isDevelopmentBuild = Application.isEditor || Debug.isDebugBuild;
             if (ServiceEndpointSettings.TryResolve(settings != null ? settings.ApiBaseUrl : string.Empty,
@@ -57,6 +58,7 @@ namespace BumperTanks.Frontend
             }
             while (!IdentityReady && string.IsNullOrEmpty(IdentityError)) yield return null;
             if (!IdentityReady) { Debug.LogWarning("Realtime identity unavailable: " + IdentityError); yield break; }
+            yield return FetchGameplayTuning();
             session.Connect(url, ProfileStore.GetServerPlayerId(), displayName, archetype, ProfileStore.GetAccessToken());
         }
 
@@ -67,6 +69,7 @@ namespace BumperTanks.Frontend
             var existingToken = ProfileStore.GetAccessToken();
             if (!string.IsNullOrEmpty(existingId) && !string.IsNullOrEmpty(existingToken))
             {
+                yield return FetchGameplayTuning();
                 IdentityReady = true;
                 yield break;
             }
@@ -87,7 +90,24 @@ namespace BumperTanks.Frontend
                 yield break;
             }
             ProfileStore.SaveServerIdentity(identity.playerId, identity.accessToken);
+            yield return FetchGameplayTuning();
             IdentityReady = true;
+        }
+
+        private IEnumerator FetchGameplayTuning()
+        {
+            if (!EndpointConfigurationValid) yield break;
+            using var request = UnityWebRequest.Get(ApiBaseUrl + "/v1/gameplay/tuning");
+            var previousEtag = RemoteGameplayTuning.ETag;
+            if (!string.IsNullOrEmpty(previousEtag)) request.SetRequestHeader("If-None-Match", previousEtag);
+            yield return request.SendWebRequest();
+            if (request.responseCode == 304)
+            {
+                RemoteGameplayTuning.UseCachedAfterNotModified();
+                yield break;
+            }
+            if (request.result == UnityWebRequest.Result.Success)
+                RemoteGameplayTuning.TryApplyResponse(request.downloadHandler.text, request.GetResponseHeader("ETag"));
         }
 
         public void SubmitMatch(string playerId, string matchId, int gems, int eliminations, Action<string> onError = null)

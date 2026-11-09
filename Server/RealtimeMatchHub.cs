@@ -23,6 +23,7 @@ public sealed class RealtimeMatchHub : IDisposable
     private readonly PlayerIdentityRepository identities;
     private readonly ProfileRepository profiles;
     private readonly TimeSpan disconnectGrace;
+    private readonly GameplayTuningSettings gameplayTuning;
     private readonly object gate = new();
     private readonly Dictionary<string, RealtimeRoom> rooms = new(StringComparer.Ordinal);
     private readonly HashSet<string> connectedPlayerIds = new(StringComparer.Ordinal);
@@ -30,12 +31,14 @@ public sealed class RealtimeMatchHub : IDisposable
     private int activeConnections;
     private bool disposed;
 
-    public RealtimeMatchHub(PlayerIdentityRepository identities, ProfileRepository profiles, IConfiguration? configuration = null)
+    public RealtimeMatchHub(PlayerIdentityRepository identities, ProfileRepository profiles, IConfiguration? configuration = null,
+        GameplayTuningSettings? gameplayTuning = null)
     {
         this.identities = identities;
         this.profiles = profiles;
         var seconds = configuration?.GetValue<int?>("Realtime:DisconnectGraceSeconds") ?? 30;
         disconnectGrace = TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 120));
+        this.gameplayTuning = gameplayTuning ?? GameplayTuningSettings.From(configuration ?? new ConfigurationBuilder().Build());
     }
 
     public async Task HandleAsync(HttpContext context)
@@ -113,7 +116,7 @@ public sealed class RealtimeMatchHub : IDisposable
                                 error = "rooms_full";
                                 break;
                             }
-                            room = new RealtimeRoom(Guid.NewGuid().ToString("N"), profiles);
+                            room = new RealtimeRoom(Guid.NewGuid().ToString("N"), profiles, gameplayTuning);
                             rooms.Add(room.RoomId, room);
                         }
 
@@ -315,6 +318,7 @@ public sealed class RealtimeMatchHub : IDisposable
         private readonly Dictionary<int, RealtimePlayer> players = new();
         private readonly Dictionary<string, RealtimePlayer> realParticipants = new(StringComparer.Ordinal);
         private readonly ProfileRepository profiles;
+        private readonly GameplayTuningSettings gameplayTuning;
         private readonly List<RealtimeShotSegment> shotSegments = new();
         private readonly List<RealtimeGemPickup> gems = new();
         private readonly List<RealtimePowerUpPickup> powerUps = new();
@@ -332,10 +336,11 @@ public sealed class RealtimeMatchHub : IDisposable
         private long matchStartedTimestamp;
         private bool disposed;
 
-        public RealtimeRoom(string roomId, ProfileRepository profiles)
+        public RealtimeRoom(string roomId, ProfileRepository profiles, GameplayTuningSettings gameplayTuning)
         {
             RoomId = roomId;
             this.profiles = profiles;
+            this.gameplayTuning = gameplayTuning;
             var seed = StableSeed(roomId);
             var jitter = new WireVector(((int)(seed % 5) - 2) * 0.1f, ((int)((seed / 5) % 5) - 2) * 0.1f);
             WireVector Place(float x, float y) => new(x + jitter.X, y + jitter.Y);
@@ -722,6 +727,7 @@ public sealed class RealtimeMatchHub : IDisposable
                 "HeavyDozer" => 0.8f,
                 _ => 1f
             };
+            speedMultiplier *= gameplayTuning.SpeedMultiplier;
             if (tick < player.NitroUntilTick) speedMultiplier *= 1.5f;
             if (tick <= player.AbilityBufferedUntilTick && tick >= player.NextAbilityTick)
             {
@@ -735,7 +741,7 @@ public sealed class RealtimeMatchHub : IDisposable
                 {
                     case "SpeedyBumper":
                         var dash = movement.LengthSquared > 0.01f ? movement.Normalized : player.Aim.Normalized;
-                        player.Velocity += dash * (14f / MassScale(player.Archetype));
+                        player.Velocity += dash * (14f * gameplayTuning.KnockbackMultiplier / MassScale(player.Archetype));
                         player.DashUntilTick = tick + TickRate * 2 / 5;
                         break;
                     case "HeavyDozer":
@@ -781,13 +787,14 @@ public sealed class RealtimeMatchHub : IDisposable
                     "HeavyDozer" => 10.8f / MassScale(player.Archetype),
                     _ => 6f / MassScale(player.Archetype)
                 };
+                shotImpulse *= gameplayTuning.KnockbackMultiplier;
                 if (tick < player.MegaBulletUntilTick) shotImpulse *= 1.8f;
                 player.Velocity -= player.Aim.Normalized * shotImpulse;
                 var cooldown = player.Archetype switch
                 {
-                    "SpeedyBumper" => Math.Max(1, (int)MathF.Ceiling(TickRate * 0.35f * 0.65f)),
-                    "HeavyDozer" => (int)MathF.Ceiling(TickRate * 0.35f * 1.8f),
-                    _ => (int)MathF.Ceiling(TickRate * 0.35f * 1.15f)
+                    "SpeedyBumper" => Math.Max(1, (int)MathF.Ceiling(TickRate * 0.35f * gameplayTuning.ProjectileCooldownMultiplier * 0.65f)),
+                    "HeavyDozer" => (int)MathF.Ceiling(TickRate * 0.35f * gameplayTuning.ProjectileCooldownMultiplier * 1.8f),
+                    _ => (int)MathF.Ceiling(TickRate * 0.35f * gameplayTuning.ProjectileCooldownMultiplier * 1.15f)
                 };
                 player.NextFireTick = tick + cooldown;
             }
@@ -843,18 +850,18 @@ public sealed class RealtimeMatchHub : IDisposable
                                              tick < target.WhirlwindUntilTick;
                         if (incomingFromFront)
                         {
-                            var reflectedImpulse = 1.5f * (tick < shooter.MegaBulletUntilTick ? 1.8f : 1f);
+                            var reflectedImpulse = 1.5f * gameplayTuning.KnockbackMultiplier * (tick < shooter.MegaBulletUntilTick ? 1.8f : 1f);
                             shooter.Velocity -= direction * (reflectedImpulse * 0.5f / MassScale(shooter.Archetype));
                         }
                         else if (deflectedBySpinner)
                         {
-                            shooter.Velocity -= direction * (1.2f / MassScale(shooter.Archetype));
+                            shooter.Velocity -= direction * (1.2f * gameplayTuning.KnockbackMultiplier / MassScale(shooter.Archetype));
                         }
                         else
                         {
                             var damage = 34f;
                             target.Health = MathF.Max(0f, target.Health - damage);
-                            var targetImpulse = 1.5f;
+                            var targetImpulse = 1.5f * gameplayTuning.KnockbackMultiplier;
                             if (tick < shooter.MegaBulletUntilTick) targetImpulse *= 1.8f;
                             target.Velocity += direction * (targetImpulse / MassScale(target.Archetype));
                             if (target.Health <= 0f) Eliminate(target, shooter);
@@ -1000,7 +1007,7 @@ public sealed class RealtimeMatchHub : IDisposable
                 var suddenDeathMultiplier = matchElapsed.TotalSeconds >= 60d ? 1.5f : 1f;
                 var firstDashMultiplier = tick < first.DashUntilTick ? 2.5f : 1f;
                 var secondDashMultiplier = tick < second.DashUntilTick ? 2.5f : 1f;
-                var baseImpulse = MathF.Max(0.5f, -relativeSpeed + 1f) * suddenDeathMultiplier;
+                var baseImpulse = MathF.Max(0.5f, -relativeSpeed + 1f) * suddenDeathMultiplier * gameplayTuning.KnockbackMultiplier;
                 var firstFlankMultiplier = Dot(first.Aim, normal) < -0.5f ? 1.5f : 1f;
                 var secondFlankMultiplier = Dot(second.Aim, normal * -1f) < -0.5f ? 1.5f : 1f;
                 first.Velocity -= normal * (baseImpulse * firstFlankMultiplier * secondDashMultiplier / MassScale(first.Archetype));

@@ -69,8 +69,8 @@ namespace BumperTanks.Gameplay
             body.linearDamping = 0f;
             tuning = TankTuning.For(archetype);
             body.mass = tuning.Mass(baseMass);
-            weapon = new TankWeapon(projectileCooldown * tuning.ProjectileCooldownMultiplier,
-                projectileImpulse * tuning.ShotKnockbackMultiplier);
+            weapon = new TankWeapon(projectileCooldown * tuning.ProjectileCooldownMultiplier * GameplayTuning.ProjectileCooldownMultiplier,
+                projectileImpulse * tuning.ShotKnockbackMultiplier * GameplayTuning.KnockbackMultiplier);
             var trajectory = new GameObject("Aim Trajectory");
             trajectory.transform.SetParent(transform, false);
             aimTrajectory = trajectory.AddComponent<LineRenderer>();
@@ -178,7 +178,8 @@ namespace BumperTanks.Gameplay
         private void FixedUpdate()
         {
             var speedMultiplier = NitroActive ? 1.5f : 1f;
-            body.linearVelocity = TankMotion.Step(body.linearVelocity, steering, acceleration, tuning.MaxSpeed(baseSpeed) * speedMultiplier, drag, Time.fixedDeltaTime);
+            body.linearVelocity = TankMotion.Step(body.linearVelocity, steering, acceleration,
+                tuning.MaxSpeed(baseSpeed) * speedMultiplier * GameplayTuning.SpeedMultiplier, drag, Time.fixedDeltaTime);
             if (body.linearVelocity.sqrMagnitude > 0.01f && !playerControlled)
             {
                 transform.up = body.linearVelocity.normalized;
@@ -284,7 +285,7 @@ namespace BumperTanks.Gameplay
             var flankHit = CombatMath.IsFlankHit(aim, impactDirection);
             var elapsed = MatchDirector.Instance != null ? MatchDirector.Instance.Elapsed : 0f;
             var knockback = CombatMath.Knockback(impulse, tuning.Mass(baseMass), flankHit, MatchRules.KnockbackMultiplier(elapsed));
-            body.AddForce(impactDirection * knockback, ForceMode2D.Impulse);
+            body.AddForce(impactDirection * knockback * GameplayTuning.KnockbackMultiplier, ForceMode2D.Impulse);
             health = Mathf.Max(0f, health - (flankHit ? 25f : 15f));
             var eliminated = health <= 0f;
             if (eliminated) gameObject.SetActive(false);
@@ -296,7 +297,7 @@ namespace BumperTanks.Gameplay
         public void ApplyCollisionKnockback(Vector2 direction, float impulse)
         {
             if (direction.sqrMagnitude <= 0f || impulse <= 0f) return;
-            body.AddForce(direction.normalized * impulse, ForceMode2D.Impulse);
+            body.AddForce(direction.normalized * impulse * GameplayTuning.KnockbackMultiplier, ForceMode2D.Impulse);
         }
 
         private void OnCollisionEnter2D(Collision2D collision)

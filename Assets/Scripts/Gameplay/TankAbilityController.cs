@@ -39,7 +39,7 @@ namespace BumperTanks.Gameplay
             switch (tank.Archetype)
             {
                 case TankArchetype.SpeedyBumper:
-                    body.AddForce(tank.Aim * 14f, ForceMode2D.Impulse);
+                    body.AddForce(tank.Aim * (14f * GameplayTuning.KnockbackMultiplier), ForceMode2D.Impulse);
                     tank.BeginDash(0.4f);
                     readyAt = Time.time + 4f;
                     break;

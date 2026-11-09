@@ -517,9 +517,10 @@ def main():
         dy = heavy_state["position"]["y"] - shooter_state["position"]["y"]
         aim_length = max(0.0001, math.hypot(dx, dy))
         time.sleep(0.05)
-        first.send({"type": "input", "tick": last_client_tick + 1, "movement": {"x": 0, "y": 0},
+        first_send_tick = max(last_client_tick + 1, facing_shield["tick"] + 1)
+        first.send({"type": "input", "tick": first_send_tick, "movement": {"x": 0, "y": 0},
                     "aim": {"x": dx / aim_length, "y": dy / aim_length}, "fire": True, "ability": False})
-        last_client_tick += 1
+        last_client_tick = first_send_tick
         reflected = wait_for(first, lambda message: message.get("type") == "snapshot" and
                              any(shot.get("ownerPlayerId") == first_join["playerId"] and
                                  shot.get("hitPlayerId") == second_join["playerId"] and shot.get("shieldBlocked")
