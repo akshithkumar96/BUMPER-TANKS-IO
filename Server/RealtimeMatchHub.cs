@@ -30,11 +30,11 @@ public sealed class RealtimeMatchHub : IDisposable
     private int activeConnections;
     private bool disposed;
 
-    public RealtimeMatchHub(PlayerIdentityRepository identities, ProfileRepository profiles, IConfiguration configuration)
+    public RealtimeMatchHub(PlayerIdentityRepository identities, ProfileRepository profiles, IConfiguration? configuration = null)
     {
         this.identities = identities;
         this.profiles = profiles;
-        var seconds = configuration.GetValue<int?>("Realtime:DisconnectGraceSeconds") ?? 30;
+        var seconds = configuration?.GetValue<int?>("Realtime:DisconnectGraceSeconds") ?? 30;
         disconnectGrace = TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 120));
     }
 
