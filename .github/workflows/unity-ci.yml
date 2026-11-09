@@ -92,6 +92,10 @@ jobs:
             target: StandaloneWindows64
             method: BumperTanks.Editor.BumperTanksBuildEntrypoint.BuildWindowsDevelopment
             artifactPath: Build/StandaloneWindows64Development
+          - name: Android-Development
+            target: Android
+            method: BumperTanks.Editor.BumperTanksBuildEntrypoint.BuildAndroidDevelopment
+            artifactPath: Build/AndroidDevelopment/BumperTanksIO.apk
     steps:
       - uses: actions/checkout@v4
         with:
