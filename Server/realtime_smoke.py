@@ -396,6 +396,36 @@ def fire_until_hit(client, snapshot, shooter_id, target_id, last_client_tick, re
     raise AssertionError(f"Timed out waiting for moving bot to be hit; last snapshot: {current}")
 
 
+def fire_until_shield_blocked(shooter_client, shield_client, snapshot, shooter_id, shield_id,
+                              shooter_tick, shield_tick, timeout=2.5):
+    """Track the moving target while firing inside the Heavy shield's short active window."""
+    deadline = time.monotonic() + timeout
+    current = snapshot
+    while time.monotonic() < deadline:
+        shooter = next(player for player in current["players"] if player["playerId"] == shooter_id)
+        shield = next(player for player in current["players"] if player["playerId"] == shield_id)
+        if not shield["shielded"]:
+            raise AssertionError(f"Heavy shield expired before a reflected shot: {current}")
+        dx = shield["position"]["x"] - shooter["position"]["x"]
+        dy = shield["position"]["y"] - shooter["position"]["y"]
+        length = max(0.0001, math.hypot(dx, dy))
+        time.sleep(0.04)
+        shooter_tick = max(shooter_tick + 1, current["tick"] + 2)
+        shield_tick = max(shield_tick + 1, current["tick"] + 2)
+        shield_client.send({"type": "input", "tick": shield_tick, "movement": {"x": 0, "y": 0},
+                            "aim": {"x": -dx / length, "y": -dy / length},
+                            "fire": False, "ability": False})
+        shooter_client.send({"type": "input", "tick": shooter_tick, "movement": {"x": 0, "y": 0},
+                             "aim": {"x": dx / length, "y": dy / length},
+                             "fire": True, "ability": False})
+        current = wait_for(shooter_client, lambda message: message.get("type") == "snapshot" and
+                           message.get("tick", 0) >= shooter_tick, timeout=0.5)
+        if any(shot.get("ownerPlayerId") == shooter_id and shot.get("hitPlayerId") == shield_id and
+               shot.get("shieldBlocked") for shot in current.get("shots", [])):
+            return current, shooter_tick, shield_tick
+    raise AssertionError(f"Timed out waiting for a Heavy shield reflection: {current}")
+
+
 def main():
     address = sys.argv[1].removeprefix("http://").removeprefix("ws://").rstrip("/")
     if len(sys.argv) > 2 and sys.argv[2] == "--reconnect-only":
@@ -505,17 +535,8 @@ def main():
         rejection = wait_for(invalid, lambda message: message.get("type") == "error", timeout=2, allow_error=True)
         assert rejection["code"] == "invalid_input", rejection
 
-        second.send({
-            "type": "input", "tick": 22,
-            "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
-            "fire": False, "ability": True,
-        })
-        heavy_shield = wait_for(second, lambda message: message.get("type") == "snapshot" and
-                                next((player["shielded"] for player in message["players"]
-                                      if player["playerId"] == second_join["playerId"]), False))
-        assert next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])["shielded"], heavy_shield
-
-        # Heavy's three-second shield faces its latest aim and reflects a front shot.
+        # Move close before activating Heavy's three-second shield.
+        heavy_shield = wait_for(second, lambda message: message.get("type") == "snapshot")
         shooter_state = next(player for player in heavy_shield["players"] if player["playerId"] == first_join["playerId"])
         heavy_state = next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])
         for _ in range(36):
@@ -535,38 +556,33 @@ def main():
             heavy_state = next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])
             time.sleep(0.05)
         assert distance <= 8.0, (shooter_state, heavy_state)
+        # Aim and activate once they are in range, then keep aim current and
+        # retry shots until a reflection is observed or the shield expires.
         dx = shooter_state["position"]["x"] - heavy_state["position"]["x"]
         dy = shooter_state["position"]["y"] - heavy_state["position"]["y"]
         aim_length = max(0.0001, math.hypot(dx, dy))
-        time.sleep(0.05)  # Leave margin under the server's per-player input rate limit.
-        second.send({"type": "input", "tick": 23, "movement": {"x": 0, "y": 0},
+        time.sleep(0.05)
+        second.send({"type": "input", "tick": 22, "movement": {"x": 0, "y": 0},
                      "aim": {"x": dx / aim_length, "y": dy / aim_length}, "fire": False, "ability": True})
         facing_shield = wait_for(second, lambda message: message.get("type") == "snapshot" and
-                                 message.get("tick", 0) > heavy_shield["tick"] and
                                  next((player["shielded"] for player in message["players"]
                                        if player["playerId"] == second_join["playerId"]), False))
-        shooter_state = next(player for player in facing_shield["players"] if player["playerId"] == first_join["playerId"])
-        heavy_state = next(player for player in facing_shield["players"] if player["playerId"] == second_join["playerId"])
-        dx = heavy_state["position"]["x"] - shooter_state["position"]["x"]
-        dy = heavy_state["position"]["y"] - shooter_state["position"]["y"]
-        aim_length = max(0.0001, math.hypot(dx, dy))
-        time.sleep(0.05)
-        first_send_tick = max(last_client_tick + 1, facing_shield["tick"] + 1)
-        first.send({"type": "input", "tick": first_send_tick, "movement": {"x": 0, "y": 0},
-                    "aim": {"x": dx / aim_length, "y": dy / aim_length}, "fire": True, "ability": False})
-        last_client_tick = first_send_tick
-        reflected = wait_for(first, lambda message: message.get("type") == "snapshot" and
-                             any(shot.get("ownerPlayerId") == first_join["playerId"] and
-                                 shot.get("hitPlayerId") == second_join["playerId"] and shot.get("shieldBlocked")
-                                 for shot in message.get("shots", [])), timeout=3)
+        reflected, last_client_tick, heavy_last_client_tick = fire_until_shield_blocked(
+            first, second, facing_shield, first_join["playerId"], second_join["playerId"], last_client_tick, 22)
         reflected_shot = next(shot for shot in reflected["shots"] if shot["ownerPlayerId"] == first_join["playerId"])
         assert reflected_shot["shieldBlocked"] and not reflected_shot["hit"], reflected
         shielded_after_hit = next(player for player in reflected["players"] if player["playerId"] == second_join["playerId"])
         assert shielded_after_hit["health"] == heavy_state["health"], reflected
 
         # The shield covers only its front arc; a perpendicular shot still damages Heavy.
+        shooter_state = next(player for player in reflected["players"] if player["playerId"] == first_join["playerId"])
+        heavy_state = next(player for player in reflected["players"] if player["playerId"] == second_join["playerId"])
+        dx = heavy_state["position"]["x"] - shooter_state["position"]["x"]
+        dy = heavy_state["position"]["y"] - shooter_state["position"]["y"]
+        aim_length = max(0.0001, math.hypot(dx, dy))
         time.sleep(0.05)
-        second.send({"type": "input", "tick": 24, "movement": {"x": 0, "y": 0},
+        heavy_last_client_tick = max(heavy_last_client_tick + 1, reflected["tick"] + 2)
+        second.send({"type": "input", "tick": heavy_last_client_tick, "movement": {"x": 0, "y": 0},
                      "aim": {"x": -dy / aim_length, "y": dx / aim_length}, "fire": False, "ability": False})
         side_facing = wait_for(second, lambda message: message.get("type") == "snapshot" and
                                message.get("tick", 0) > reflected["tick"])
