@@ -26,7 +26,7 @@ namespace BumperTanks.Gameplay
         private readonly HashSet<int> aliveOnlinePlayers = new();
         private string localPlayerId;
         private string realtimeStatus = "Offline";
-        private float inputSendAccumulator;
+        private readonly InputSendCadence inputSendCadence = new();
         private int inputTick = -1;
         private int onlinePlayerId = -1;
         private int appliedArenaTick = -1;
@@ -352,21 +352,16 @@ namespace BumperTanks.Gameplay
         private void UpdateRealtimeInput()
         {
             if (player == null || realtime == null || !realtime.IsConnected || onlinePlayerId < 0) return;
-            inputSendAccumulator += Time.unscaledDeltaTime;
-            var interval = 1f / (realtime.TickRate > 0 ? realtime.TickRate : MatchmakingPolicy.SimulationTicksPerSecond);
-            if (inputSendAccumulator >= interval)
-            {
-                inputSendAccumulator %= interval;
-                realtime.SubmitInput(player.ConsumeNetworkInput(++inputTick,
-                    Time.timeScale > 0f && player.gameObject.activeInHierarchy));
-            }
+            if (!inputSendCadence.TryConsume(Time.realtimeSinceStartup, realtime.TickRate)) return;
+            realtime.SubmitInput(player.ConsumeNetworkInput(++inputTick,
+                Time.timeScale > 0f && player.gameObject.activeInHierarchy));
         }
 
         private void OnRealtimeRoomJoined(RealtimeRoomJoined room)
         {
             onlinePlayerId = room.PlayerId;
             inputTick = -1;
-            inputSendAccumulator = 0f;
+            inputSendCadence.Reset();
             appliedArenaTick = -1;
             appliedPickupTick = -1;
             onlineGemCount = 0;
@@ -615,7 +610,19 @@ namespace BumperTanks.Gameplay
 
         private void OnRealtimeError(string error)
         {
-            realtimeStatus = onlineMatch ? $"Online connection issue: {error}" : $"Offline fallback · {error}";
+            var statusError = error;
+            const string closePrefix = "Realtime WebSocket closed (";
+            if (!string.IsNullOrEmpty(error) && error.StartsWith(closePrefix, StringComparison.Ordinal))
+            {
+                var closeDetails = error.Substring(closePrefix.Length);
+                var closeCodeEnd = closeDetails.IndexOf(')');
+                statusError = closeCodeEnd >= 0
+                    ? "Realtime WS " + closeDetails.Substring(0, closeCodeEnd) + closeDetails.Substring(closeCodeEnd + 1)
+                    : "Realtime WS " + closeDetails;
+            }
+            realtimeStatus = onlineMatch
+                ? statusError.StartsWith("Realtime WS ", StringComparison.Ordinal) ? statusError : $"Online issue: {statusError}"
+                : $"Offline fallback · {statusError}";
             ShowMatchAccessibility();
         }
 

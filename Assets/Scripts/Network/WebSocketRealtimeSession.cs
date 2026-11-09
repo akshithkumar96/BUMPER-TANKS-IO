@@ -59,6 +59,7 @@ namespace BumperTanks.Network
         private int reconnectAttempts;
         private int transportGeneration;
         private int latestSnapshotTick = -1;
+        private string lastTransportError;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
         [DllImport("__Internal")] private static extern void BumperSocketConnect(string url, int id, string receiver);
@@ -241,7 +242,9 @@ namespace BumperTanks.Network
         {
             var split = connectionId?.IndexOf('\n') ?? -1;
             var idText = split >= 0 ? connectionId.Substring(0, split) : connectionId;
-            if (int.TryParse(idText, out var id) && id == webGlId) OnTransportClosed(id);
+            if (!int.TryParse(idText, out var id) || id != webGlId) return;
+            var closeDetails = split >= 0 ? connectionId.Substring(split + 1) : string.Empty;
+            OnTransportClosed(id, closeDetails);
         }
 
         private void ReceiveText(string text)
@@ -303,7 +306,8 @@ namespace BumperTanks.Network
                 case "error":
                 {
                     var error = RealtimeMessageCodec.ReadError(json);
-                    QueueError(string.IsNullOrEmpty(error) ? "Realtime server rejected the request." : error);
+                    lastTransportError = string.IsNullOrEmpty(error) ? "Realtime server rejected the request." : error;
+                    QueueError(lastTransportError);
                     break;
                 }
                 default: throw new FormatException("Unknown server message type '" + messageType + "'.");
@@ -334,7 +338,8 @@ namespace BumperTanks.Network
         {
             if (generation != transportGeneration) return;
             IsConnecting = false;
-            Error?.Invoke(string.IsNullOrEmpty(message) ? "Realtime connection failed." : message);
+            lastTransportError = string.IsNullOrEmpty(message) ? "Realtime connection failed." : message;
+            Error?.Invoke(lastTransportError);
         }
 
         private void OnTransportOpen(int generation)
@@ -343,17 +348,42 @@ namespace BumperTanks.Network
             IsConnecting = false;
             IsConnected = true;
             reconnectAttempts = 0;
+            lastTransportError = null;
             SendFrame(BuildJoinFrame());
         }
 
         private void OnTransportClosed(int generation)
+            => OnTransportClosed(generation, string.Empty);
+
+        private void OnTransportClosed(int generation, string closeDetails)
         {
             if (generation != transportGeneration) return;
             var wasConnected = IsConnected || IsConnecting;
             IsConnected = false;
             IsConnecting = false;
             if (wasConnected) Disconnected?.Invoke();
+            if (wasConnected)
+            {
+                var details = DescribeClose(closeDetails);
+                var diagnostic = !string.IsNullOrEmpty(lastTransportError) ? lastTransportError : details;
+                if (!string.IsNullOrEmpty(diagnostic))
+                {
+                    Debug.LogWarning("Realtime transport closed: " + diagnostic);
+                    Error?.Invoke(diagnostic);
+                }
+            }
             if (!explicitDisconnect) ScheduleReconnect();
+        }
+
+        private static string DescribeClose(string closeDetails)
+        {
+            if (string.IsNullOrEmpty(closeDetails)) return string.Empty;
+            var split = closeDetails.IndexOf('\n');
+            var code = split >= 0 ? closeDetails.Substring(0, split) : closeDetails;
+            var reason = split >= 0 ? closeDetails.Substring(split + 1) : string.Empty;
+            if (code == "1000" && string.IsNullOrEmpty(reason)) return string.Empty;
+            return "Realtime WebSocket closed (" + code + ")" +
+                (string.IsNullOrEmpty(reason) ? "." : ": " + reason);
         }
 
 #if UNITY_WEBGL && !UNITY_EDITOR

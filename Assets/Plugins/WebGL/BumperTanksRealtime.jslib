@@ -41,7 +41,7 @@ mergeInto(LibraryManager.library, {
         if (!BumperTanksSockets[key]) return;
         clearTimeout(state.connectTimeout);
         delete BumperTanksSockets[key];
-        SendMessage(receiver, "OnWebSocketClose", key + "\n" + (event.reason || "Connection closed."));
+        SendMessage(receiver, "OnWebSocketClose", key + "\n" + event.code + "\n" + (event.reason || ""));
       };
     } catch (error) {
       SendMessage(receiver, "OnWebSocketError", key + "\n" + (error && error.message ? error.message : "Unable to open WebSocket."));
