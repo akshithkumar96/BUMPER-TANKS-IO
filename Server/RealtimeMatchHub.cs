@@ -402,6 +402,8 @@ public sealed class RealtimeMatchHub : IDisposable
                 }
                 player.Connection = connection;
                 player.DisconnectedAtUtc = null;
+                player.LastInputTick = -1;
+                player.LastInputTimestamp = 0;
                 resumed = player;
                 return true;
             }

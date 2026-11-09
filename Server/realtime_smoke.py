@@ -231,6 +231,13 @@ def smoke_reconnect(address, grace_seconds):
                              any(player["playerId"] == joined["playerId"] for player in message.get("players", [])))
     player_state = next(player for player in resumed_state["players"] if player["playerId"] == joined["playerId"])
     assert player_state["gems"] == before["gems"] and player_state["archetype"] == before["archetype"] and player_state["health"] <= before["health"], (before, player_state)
+    resumed.send({"type": "input", "tick": 1, "movement": {"x": 0, "y": 1}, "aim": {"x": 0, "y": 1},
+                  "fire": False, "ability": False})
+    restarted_sequence = wait_for(resumed, lambda message: message.get("type") == "snapshot" and
+                                  message.get("tick", 0) > resumed_state.get("tick", 0) and
+                                  next((player["velocity"]["y"] for player in message.get("players", [])
+                                        if player["playerId"] == joined["playerId"]), 0) > 0.5, timeout=2)
+    assert restarted_sequence["tick"] > resumed_state["tick"], restarted_sequence
     resumed.close()
     time.sleep(grace_seconds + 0.3)
     fresh, fresh_join = join_identity(address, "resume", identity)
@@ -238,7 +245,7 @@ def smoke_reconnect(address, grace_seconds):
         assert fresh_join["roomId"] != joined["roomId"] and fresh_join["playerId"] != joined["playerId"], fresh_join
     finally:
         fresh.close()
-    print("Realtime reconnect smoke passed: identity and slot resume with retained state, duplicate sockets rejected, grace expiry creates a fresh room and slot.")
+    print("Realtime reconnect smoke passed: identity and slot resume with retained state, restarted input ticks, duplicate sockets rejected, grace expiry creates a fresh room and slot.")
 
 
 def drive_toward_pickups(clients, player_ids, snapshot, pickup_ids):
