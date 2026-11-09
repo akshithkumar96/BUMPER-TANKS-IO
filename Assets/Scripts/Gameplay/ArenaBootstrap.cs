@@ -180,6 +180,8 @@ namespace BumperTanks.Gameplay
                 var eliminations = onlineMatch ? onlineEliminations : player != null ? match.Scores.EliminationsFor(player.GetInstanceID()) : 0;
                 GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 157f, 360, 24), safe), onlineMatch ? $"Online Gems: {onlineGemCount}  KOs: {eliminations}" : $"Gems: {gems}  KOs: {eliminations}");
                 GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 178f, 320, 24), safe), RealtimeStatusText());
+                if (CanOfferRealtimeRetry() && GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 204f, 170f, 44f), safe), "Retry Online"))
+                    RetryOnline();
                 if (onlineMatch ? onlinePhase == "finished" : match.Winner != null || match.Phase == BumperTanks.Match.MatchPhase.Complete)
                 {
                     var label = onlineMatch
@@ -324,7 +326,27 @@ namespace BumperTanks.Gameplay
                     actions.Add(new AccessibleUiAction("Activate tank ability", "Use the archetype ability. It may be on cooldown.", frame, () => ability.Activate()));
                 }
             }
+            if (CanOfferRealtimeRetry())
+                actions.Add(new AccessibleUiAction("Retry Online", "Reconnect to your online match. Match state can be restored for 30 seconds after a connection loss.",
+                    GuiSafeAreaLayout.Clamp(new Rect(safe.x + 17f, safe.y + 204f, 170f, 44f), safe), RetryOnline));
             accessibleUi?.ShowScreen($"Match controls. Drag the left side to steer; drag and release the right side to aim and fire. {RealtimeStatusText()}", actions.ToArray());
+        }
+
+        private bool CanOfferRealtimeRetry()
+        {
+            var service = GameServiceClient.Instance;
+            return onlineMatch && realtime != null && !realtime.IsConnected && !realtime.IsConnecting &&
+                service != null && service.IdentityReady && !string.IsNullOrWhiteSpace(realtimeEndpoint) &&
+                Uri.TryCreate(realtimeEndpoint, UriKind.Absolute, out var endpoint) &&
+                (endpoint.Scheme == "ws" || endpoint.Scheme == "wss");
+        }
+
+        private void RetryOnline()
+        {
+            if (!CanOfferRealtimeRetry()) return;
+            realtimeStatus = "Retrying online connection…";
+            realtime.Reconnect();
+            ShowMatchAccessibility();
         }
 
         private void UpdateRealtimeInput()

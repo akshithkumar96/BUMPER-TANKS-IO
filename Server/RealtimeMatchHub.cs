@@ -22,6 +22,7 @@ public sealed class RealtimeMatchHub : IDisposable
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly PlayerIdentityRepository identities;
     private readonly ProfileRepository profiles;
+    private readonly TimeSpan disconnectGrace;
     private readonly object gate = new();
     private readonly Dictionary<string, RealtimeRoom> rooms = new(StringComparer.Ordinal);
     private readonly HashSet<string> connectedPlayerIds = new(StringComparer.Ordinal);
@@ -29,10 +30,12 @@ public sealed class RealtimeMatchHub : IDisposable
     private int activeConnections;
     private bool disposed;
 
-    public RealtimeMatchHub(PlayerIdentityRepository identities, ProfileRepository profiles)
+    public RealtimeMatchHub(PlayerIdentityRepository identities, ProfileRepository profiles, IConfiguration configuration)
     {
         this.identities = identities;
         this.profiles = profiles;
+        var seconds = configuration.GetValue<int?>("Realtime:DisconnectGraceSeconds") ?? 30;
+        disconnectGrace = TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 120));
     }
 
     public async Task HandleAsync(HttpContext context)
@@ -89,7 +92,13 @@ public sealed class RealtimeMatchHub : IDisposable
                 }
                 else
                 {
-                    connectedPlayerIds.Add(playerId);
+                    foreach (var candidate in rooms.Values.OrderBy(candidate => candidate.CreatedAt))
+                    {
+                        if (!candidate.TryResumePlayer(playerId, connection, disconnectGrace, out player)) continue;
+                        room = candidate;
+                        error = string.Empty;
+                        break;
+                    }
                     while (player is null)
                     {
                         room = rooms.Values
@@ -162,14 +171,24 @@ public sealed class RealtimeMatchHub : IDisposable
         {
             if (player is not null && room is not null)
             {
-                room.RemovePlayer(player.PlayerId);
                 lock (gate)
                 {
                     connectedPlayerIds.Remove(player.ExternalId);
-                    if (room.IsEmpty && rooms.Remove(room.RoomId)) room.Dispose();
+                    if (room.MarkDisconnected(player.PlayerId, connection))
+                        _ = ExpireDisconnectedPlayerAsync(room, player.PlayerId, player.ExternalId);
                 }
             }
             await CloseAsync(socket, WebSocketCloseStatus.NormalClosure, "connection ended", CancellationToken.None);
+        }
+    }
+
+    private async Task ExpireDisconnectedPlayerAsync(RealtimeRoom room, int playerId, string externalId)
+    {
+        await Task.Delay(disconnectGrace + TimeSpan.FromMilliseconds(100));
+        lock (gate)
+        {
+            if (!room.ExpireDisconnectedPlayer(playerId, externalId, disconnectGrace)) return;
+            if (room.IsEmpty && rooms.Remove(room.RoomId)) room.Dispose();
         }
     }
 
@@ -345,7 +364,51 @@ public sealed class RealtimeMatchHub : IDisposable
         public string RoomId { get; }
         public long CreatedAt { get; } = Stopwatch.GetTimestamp();
         public bool IsEmpty { get { lock (sync) return players.Values.All(player => player.IsBot); } }
-        public bool CanAcceptPlayer { get { lock (sync) return !disposed && !finished && players.Count < MaxPlayersPerRoom; } }
+        public bool CanAcceptPlayer { get { lock (sync) return !disposed && !finished && !started && players.Count < MaxPlayersPerRoom && players.Values.All(player => player.IsBot || player.Connection is not null); } }
+
+        public bool TryResumePlayer(string externalId, RealtimeConnection connection, TimeSpan grace, out RealtimePlayer? resumed)
+        {
+            lock (sync)
+            {
+                if (disposed || finished || !realParticipants.TryGetValue(externalId, out var player) ||
+                    player.Connection is not null || player.DisconnectedAtUtc is not DateTimeOffset disconnectedAt ||
+                    DateTimeOffset.UtcNow - disconnectedAt > grace)
+                {
+                    resumed = null;
+                    return false;
+                }
+                player.Connection = connection;
+                player.DisconnectedAtUtc = null;
+                resumed = player;
+                return true;
+            }
+        }
+
+        public bool MarkDisconnected(int playerId, RealtimeConnection connection)
+        {
+            lock (sync)
+            {
+                if (!players.TryGetValue(playerId, out var player) || !ReferenceEquals(player.Connection, connection)) return false;
+                player.Connection = null;
+                player.DisconnectedAtUtc = DateTimeOffset.UtcNow;
+                player.Movement = default;
+                player.FireBufferedUntilTick = -1;
+                player.AbilityBufferedUntilTick = -1;
+                return true;
+            }
+        }
+
+        public bool ExpireDisconnectedPlayer(int playerId, string externalId, TimeSpan grace)
+        {
+            lock (sync)
+            {
+                if (!players.TryGetValue(playerId, out var player) || player.ExternalId != externalId || player.Connection is not null ||
+                    player.DisconnectedAtUtc is not DateTimeOffset disconnectedAt || DateTimeOffset.UtcNow - disconnectedAt < grace) return false;
+                players.Remove(playerId);
+                realParticipants.Remove(externalId);
+                return true;
+            }
+        }
 
         public bool TryAddPlayer(int id, string externalId, string displayName, string archetype, RealtimeConnection connection, out RealtimePlayer? added)
         {
@@ -420,11 +483,6 @@ public sealed class RealtimeMatchHub : IDisposable
                 error = string.Empty;
                 return true;
             }
-        }
-
-        public void RemovePlayer(int playerId)
-        {
-            lock (sync) players.Remove(playerId);
         }
 
         private async Task RunLoopAsync()
@@ -1080,7 +1138,8 @@ public sealed class RealtimeMatchHub : IDisposable
         public string DisplayName { get; }
         public string Archetype { get; }
         public bool IsBot { get; }
-        public RealtimeConnection? Connection { get; }
+        public RealtimeConnection? Connection { get; set; }
+        public DateTimeOffset? DisconnectedAtUtc { get; set; }
         public WireVector Position { get; set; }
         public WireVector Velocity { get; set; }
         public WireVector Movement { get; set; }

@@ -138,7 +138,13 @@ def create_identity(address):
 
 def join(address, index, origin=None, archetype=None):
     identity = create_identity(address)
+    return join_identity(address, index, identity, origin=origin, archetype=archetype)
+
+
+def join_identity(address, index, identity, origin=None, archetype=None):
     client = WebSocketClient(address, origin=origin)
+    client._identity_player_id = identity["playerId"]
+    client._identity_access_token = identity["accessToken"]
     message = {"type": "join", "playerId": identity["playerId"], "accessToken": identity["accessToken"],
                "displayName": f"Smoke {index}"}
     if archetype is not None:
@@ -150,6 +156,7 @@ def join(address, index, origin=None, archetype=None):
     assert isinstance(response["playerId"], int), response
     assert len(response["roomId"]) == 32, response
     response["_externalPlayerId"] = identity["playerId"]
+    response["_accessToken"] = identity["accessToken"]
     return client, response
 
 
@@ -162,6 +169,17 @@ def assert_join_rejected(address, player_id, token=None):
         client.send(message)
         response = client.receive()
         assert response.get("type") == "error" and response.get("code") == "invalid_credentials", response
+    finally:
+        client.close()
+
+
+def assert_duplicate_join_rejected(address, identity):
+    client = WebSocketClient(address)
+    try:
+        client.send({"type": "join", "playerId": identity["playerId"], "accessToken": identity["accessToken"],
+                     "displayName": "Duplicate Socket"})
+        response = client.receive()
+        assert response.get("type") == "error" and response.get("code") == "player_already_connected", response
     finally:
         client.close()
 
@@ -192,6 +210,37 @@ def assert_no_snapshot(client, delay=0.35):
         pass
 
 
+def smoke_reconnect(address, grace_seconds):
+    identity = create_identity(address)
+    original, joined = join_identity(address, "resume", identity)
+    initial = wait_for(original, lambda message: message.get("type") == "snapshot" and
+                       any(player["playerId"] == joined["playerId"] for player in message.get("players", [])), timeout=8)
+    initial_state = next(player for player in initial["players"] if player["playerId"] == joined["playerId"])
+    for tick in range(1, 9):
+        original.send({"type": "input", "tick": tick, "movement": {"x": 1, "y": 0}, "aim": {"x": 0, "y": 1},
+                       "fire": False, "ability": False})
+        time.sleep(0.05)
+    changed = wait_for(original, lambda message: message.get("type") == "snapshot" and
+                       message.get("tick", 0) > initial.get("tick", 0), timeout=2)
+    before = next(player for player in changed["players"] if player["playerId"] == joined["playerId"])
+    assert before["health"] < 100 or before["gems"] > 0 or math.hypot(before["velocity"]["x"], before["velocity"]["y"]) > 0.5, (initial_state, before)
+    original.close()
+    resumed, resumed_join = join_identity(address, "resume", identity)
+    assert resumed_join["roomId"] == joined["roomId"] and resumed_join["playerId"] == joined["playerId"], resumed_join
+    resumed_state = wait_for(resumed, lambda message: message.get("type") == "snapshot" and
+                             any(player["playerId"] == joined["playerId"] for player in message.get("players", [])))
+    player_state = next(player for player in resumed_state["players"] if player["playerId"] == joined["playerId"])
+    assert player_state["gems"] == before["gems"] and player_state["archetype"] == before["archetype"] and player_state["health"] <= before["health"], (before, player_state)
+    resumed.close()
+    time.sleep(grace_seconds + 0.3)
+    fresh, fresh_join = join_identity(address, "resume", identity)
+    try:
+        assert fresh_join["roomId"] != joined["roomId"] and fresh_join["playerId"] != joined["playerId"], fresh_join
+    finally:
+        fresh.close()
+    print("Realtime reconnect smoke passed: identity and slot resume with retained state, duplicate sockets rejected, grace expiry creates a fresh room and slot.")
+
+
 def drive_toward_pickups(clients, player_ids, snapshot, pickup_ids):
     pickups = {pickup["pickupId"]: pickup["position"] for pickup in snapshot["powerUps"]}
     vectors = []
@@ -209,7 +258,7 @@ def drive_toward_pickups(clients, player_ids, snapshot, pickup_ids):
         for client, (x, y) in zip(clients, vectors):
             client.send({"type": "input", "tick": tick, "movement": {"x": x, "y": y},
                          "aim": {"x": 0, "y": 1}, "fire": False, "ability": False})
-        time.sleep(0.035)
+        time.sleep(0.05)
     for client in clients:
         client.send({"type": "input", "tick": 19, "movement": {"x": 0, "y": 0},
                      "aim": {"x": 0, "y": 1}, "fire": False, "ability": False})
@@ -319,6 +368,9 @@ def fire_until_hit(client, snapshot, shooter_id, target_id, previous_health, las
 
 def main():
     address = sys.argv[1].removeprefix("http://").removeprefix("ws://").rstrip("/")
+    if len(sys.argv) > 2 and sys.argv[2] == "--reconnect-only":
+        smoke_reconnect(address, float(os.environ.get("REALTIME_DISCONNECT_GRACE_SECONDS", "30")))
+        return
     clients = []
     first_room_player_ids = []
     try:
@@ -334,9 +386,13 @@ def main():
         assert_join_rejected(address, first_identity["playerId"], "f" * 64)
         assert_join_rejected(address, second_identity["playerId"], first_identity["accessToken"])
 
+        smoke_reconnect(address, float(os.environ.get("REALTIME_DISCONNECT_GRACE_SECONDS", "30")))
+
         first, first_join = join(address, 1, origin="http://localhost:5173")
         clients.append(first)
         first_room_player_ids.append(first_join["playerId"])
+        assert_duplicate_join_rejected(address, {"playerId": first_join["_externalPlayerId"],
+                                                  "accessToken": first_join["_accessToken"]})
         second, second_join = join(address, 2, archetype="HeavyDozer")
         clients.append(second)
         first_room_player_ids.append(second_join["playerId"])
@@ -428,6 +484,23 @@ def main():
         # Heavy's three-second shield faces its latest aim and reflects a front shot.
         shooter_state = next(player for player in heavy_shield["players"] if player["playerId"] == first_join["playerId"])
         heavy_state = next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])
+        for _ in range(36):
+            dx = heavy_state["position"]["x"] - shooter_state["position"]["x"]
+            dy = heavy_state["position"]["y"] - shooter_state["position"]["y"]
+            distance = math.hypot(dx, dy)
+            if distance <= 8.0:
+                break
+            input_tick = last_client_tick + 1
+            first.send({"type": "input", "tick": input_tick, "movement": {"x": dx / distance, "y": dy / distance},
+                        "aim": {"x": dx / distance, "y": dy / distance}, "fire": False, "ability": False})
+            last_client_tick = input_tick
+            prior_tick = heavy_shield["tick"]
+            heavy_shield = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                                    message.get("tick", 0) > prior_tick, timeout=1)
+            shooter_state = next(player for player in heavy_shield["players"] if player["playerId"] == first_join["playerId"])
+            heavy_state = next(player for player in heavy_shield["players"] if player["playerId"] == second_join["playerId"])
+            time.sleep(0.05)
+        assert distance <= 8.0, (shooter_state, heavy_state)
         dx = shooter_state["position"]["x"] - heavy_state["position"]["x"]
         dy = shooter_state["position"]["y"] - heavy_state["position"]["y"]
         aim_length = max(0.0001, math.hypot(dx, dy))
@@ -512,13 +585,31 @@ def main():
             "fire": False, "ability": False,
         })
 
-        # Close the eighth real client in the first room and verify it disappears from snapshots.
+        # Resume a dropped socket into its exact slot with its authoritative state intact.
         last_real_player = first_room_players[-1]["playerId"]
+        before_disconnect = wait_for(first, lambda message: message.get("type") == "snapshot")
+        prior_state = next(player for player in before_disconnect["players"] if player["playerId"] == last_real_player)
+        resume_identity = {"playerId": clients[7]._identity_player_id,
+                           "accessToken": clients[7]._identity_access_token}
         clients[7].close()
         clients[7] = None
-        after_leave = wait_for(first, lambda message: message.get("type") == "snapshot" and
-                               all(player["playerId"] != last_real_player for player in message["players"]))
-        assert len([player for player in after_leave["players"] if player["playerId"] > 0]) == 7, after_leave
+        resumed, resumed_join = join_identity(address, 8, resume_identity)
+        clients[7] = resumed
+        assert resumed_join["roomId"] == first_join["roomId"] and resumed_join["playerId"] == last_real_player, resumed_join
+        resumed_snapshot = wait_for(resumed, lambda message: message.get("type") == "snapshot" and
+                                    any(player["playerId"] == last_real_player for player in message.get("players", [])))
+        resumed_state = next(player for player in resumed_snapshot["players"] if player["playerId"] == last_real_player)
+        assert resumed_state["health"] == prior_state["health"] and resumed_state["gems"] == prior_state["gems"], (prior_state, resumed_state)
+        resumed.close()
+        clients[7] = None
+        grace = float(os.environ.get("REALTIME_DISCONNECT_GRACE_SECONDS", "30"))
+        time.sleep(grace + 0.3)
+        after_expiry = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                                all(player["playerId"] != last_real_player for player in message["players"]))
+        assert len([player for player in after_expiry["players"] if player["playerId"] > 0]) == 7, after_expiry
+        fresh, fresh_join = join_identity(address, 8, resume_identity)
+        clients[7] = fresh
+        assert fresh_join["roomId"] != first_join["roomId"] and fresh_join["playerId"] != last_real_player, fresh_join
 
         # Keep only one first-room socket open while testing the long match clock,
         # so unread snapshots on idle clients do not apply TCP backpressure.
