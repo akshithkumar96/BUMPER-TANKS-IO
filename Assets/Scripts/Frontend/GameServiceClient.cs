@@ -44,20 +44,28 @@ namespace BumperTanks.Frontend
             if (EndpointConfigurationValid) StartCoroutine(InitializeIdentity());
         }
 
-        public void ConnectRealtime(BumperTanks.Network.WebSocketRealtimeSession session, string url, string displayName, string archetype)
+        public void ConnectRealtime(BumperTanks.Network.WebSocketRealtimeSession session, string url, string displayName, string archetype, Action<string> onError = null)
         {
-            StartCoroutine(ConnectRealtimeWhenReady(session, url, displayName, archetype));
+            StartCoroutine(ConnectRealtimeWhenReady(session, url, displayName, archetype, onError));
         }
 
-        private IEnumerator ConnectRealtimeWhenReady(BumperTanks.Network.WebSocketRealtimeSession session, string url, string displayName, string archetype)
+        private IEnumerator ConnectRealtimeWhenReady(BumperTanks.Network.WebSocketRealtimeSession session, string url, string displayName, string archetype, Action<string> onError)
         {
             if (!EndpointConfigurationValid)
             {
-                Debug.LogWarning("Online matchmaking unavailable: " + EndpointConfigurationError);
+                var error = "Online matchmaking unavailable: " + EndpointConfigurationError;
+                Debug.LogWarning(error);
+                onError?.Invoke(error);
                 yield break;
             }
             while (!IdentityReady && string.IsNullOrEmpty(IdentityError)) yield return null;
-            if (!IdentityReady) { Debug.LogWarning("Realtime identity unavailable: " + IdentityError); yield break; }
+            if (!IdentityReady)
+            {
+                var error = "Realtime identity unavailable: " + IdentityError;
+                Debug.LogWarning(error);
+                onError?.Invoke(error);
+                yield break;
+            }
             yield return FetchGameplayTuning();
             session.Connect(url, ProfileStore.GetServerPlayerId(), displayName, archetype, ProfileStore.GetAccessToken());
         }
