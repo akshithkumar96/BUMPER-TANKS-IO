@@ -2,7 +2,7 @@
 
 Run locally with `dotnet run --project Server/BumperTanks.Server.csproj`.
 
-Endpoints: `GET /health`, `POST /v1/identity/anonymous`, `GET /v1/profiles/{playerId}`, `POST /v1/rewards/daily`, `GET /v1/cosmetics`, `POST /v1/cosmetics/purchase`, `POST /v1/matches/complete`, `GET /v1/leaderboard`, and WebSocket `/v1/realtime`.
+Endpoints: `GET /health`, `POST /v1/identity/anonymous`, `GET /v1/profiles/{playerId}`, `POST /v1/rewards/daily`, `GET /v1/cosmetics`, `POST /v1/cosmetics/purchase`, `POST /v1/matches/complete`, `POST /v1/telemetry`, `POST /v1/crash-reports`, `GET /v1/leaderboard`, and WebSocket `/v1/realtime`.
 
 Call `POST /v1/identity/anonymous` to create an anonymous player identity. The response contains a server-issued `playerId` and 256-bit `accessToken`; persist both on the client and send `Authorization: Bearer <accessToken>` on profile, daily reward, cosmetic purchase, match completion, and telemetry requests. These endpoints reject missing credentials and reject a request body or route player ID that does not match the token owner. The server persists only SHA-256 token hashes in `data/identities.json`; configure `Storage__IdentityPath` to place this file on a mounted volume. Anonymous credentials cannot be recovered if the client loses its token.
 
