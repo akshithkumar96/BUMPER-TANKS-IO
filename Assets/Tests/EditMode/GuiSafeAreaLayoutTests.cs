@@ -39,5 +39,24 @@ namespace BumperTanks.Tests
             Assert.That(frame.xMax, Is.EqualTo(safe.xMax));
             Assert.That(frame.yMax, Is.EqualTo(safe.yMax));
         }
+
+        [TestCase(390f, 844f)]
+        [TestCase(320f, 568f)]
+        [TestCase(1280f, 720f)]
+        public void FrontMenuConsentTextAndTouchTargetsFitWithoutOverlap(float width, float height)
+        {
+            var safe = GuiSafeAreaLayout.ToGuiRect(new Rect(0f, 0f, width, height), height, 8f);
+            var menu = GuiSafeAreaLayout.FrontMenu(safe);
+
+            Assert.That(menu.TelemetryStatus.yMin, Is.GreaterThanOrEqualTo(menu.Panel.yMin));
+            Assert.That(menu.TelemetryStatus.yMax, Is.LessThanOrEqualTo(menu.AllowButton.yMin));
+            Assert.That(menu.AllowButton.yMax, Is.LessThanOrEqualTo(menu.CurrencyLabel.yMin));
+            Assert.That(menu.DeclineButton.yMin, Is.EqualTo(menu.AllowButton.yMin));
+            Assert.That(menu.AllowButton.height, Is.EqualTo(44f));
+            Assert.That(menu.DeclineButton.height, Is.EqualTo(44f));
+            Assert.That(menu.CurrencyLabel.yMax, Is.LessThanOrEqualTo(menu.Panel.yMax));
+            Assert.That(menu.TelemetryStatus.xMin, Is.GreaterThanOrEqualTo(safe.xMin));
+            Assert.That(menu.TelemetryStatus.xMax, Is.LessThanOrEqualTo(safe.xMax));
+        }
     }
 }
