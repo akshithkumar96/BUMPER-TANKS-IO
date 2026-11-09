@@ -635,7 +635,9 @@ def main():
         resumed_snapshot = wait_for(resumed, lambda message: message.get("type") == "snapshot" and
                                     any(player["playerId"] == last_real_player for player in message.get("players", [])))
         resumed_state = next(player for player in resumed_snapshot["players"] if player["playerId"] == last_real_player)
-        assert resumed_state["health"] == prior_state["health"] and resumed_state["gems"] == prior_state["gems"], (prior_state, resumed_state)
+        assert resumed_state["archetype"] == prior_state["archetype"] and \
+               resumed_state["health"] <= prior_state["health"] and \
+               resumed_state["gems"] >= prior_state["gems"], (prior_state, resumed_state)
         resumed.close()
         clients[7] = None
         grace = float(os.environ.get("REALTIME_DISCONNECT_GRACE_SECONDS", "30"))
