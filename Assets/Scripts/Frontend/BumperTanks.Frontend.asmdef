@@ -1,7 +1,7 @@
 {
   "name": "BumperTanks.Frontend",
   "rootNamespace": "BumperTanks.Frontend",
-  "references": ["BumperTanks.Core", "BumperTanks.Network"],
+  "references": ["BumperTanks.Core", "BumperTanks.Network", "Unity.LevelPlay"],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

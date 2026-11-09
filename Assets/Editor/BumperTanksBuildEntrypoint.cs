@@ -14,6 +14,24 @@ namespace BumperTanks.Editor
     {
         private const string ProductFileName = "BumperTanksIO";
 
+        public static void BuildAndroidDevelopment()
+        {
+            var targetGroup = BuildTargetGroup.Android;
+            var previousBackend = PlayerSettings.GetScriptingBackend(targetGroup);
+            var previousAndroidArchitectures = PlayerSettings.Android.targetArchitectures;
+            try
+            {
+                // Keep the fast Development APK path separate from release backend settings.
+                PlayerSettings.SetScriptingBackend(targetGroup, ScriptingImplementation.Mono2x);
+                PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARMv7;
+                Build(BuildTarget.Android, true);
+            }
+            finally
+            {
+                PlayerSettings.SetScriptingBackend(targetGroup, previousBackend);
+                PlayerSettings.Android.targetArchitectures = previousAndroidArchitectures;
+            }
+        }
         public static void BuildWindowsDevelopment() => Build(BuildTarget.StandaloneWindows64, true);
         public static void BuildWebGlDevelopment() => Build(BuildTarget.WebGL, true);
         public static void BuildWindowsRelease() => Build(BuildTarget.StandaloneWindows64, false);
@@ -38,7 +56,12 @@ namespace BumperTanks.Editor
             var suffix = development ? "Development" : "Release";
             var folder = Path.Combine("Build", target.ToString() + suffix);
             Directory.CreateDirectory(folder);
-            var extension = target == BuildTarget.StandaloneWindows64 ? ".exe" : string.Empty;
+            var extension = target switch
+            {
+                BuildTarget.StandaloneWindows64 => ".exe",
+                BuildTarget.Android => ".apk",
+                _ => string.Empty
+            };
             var outputPath = Path.GetFullPath(Path.Combine(folder, ProductFileName + extension));
             var options = new BuildPlayerOptions
             {
