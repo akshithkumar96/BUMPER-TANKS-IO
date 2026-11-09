@@ -57,6 +57,7 @@ jobs:
           export Storage__Provider=PostgreSQL
           export ConnectionStrings__GameDatabase="Host=localhost;Port=5432;Database=bumper_tanks;Username=bumper;Password=bumper-ci-password"
           export Realtime__DisconnectGraceSeconds=2
+          export Realtime__JoinTimeoutSeconds=2
           export REALTIME_DISCONNECT_GRACE_SECONDS=2
           export Rewards__RequireMatchAttestation=true
           export Rewards__MatchAttestationSecret=ci-only-match-attestation-secret-32-bytes-minimum

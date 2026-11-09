@@ -23,6 +23,7 @@ public sealed class RealtimeMatchHub : IDisposable
     private readonly IPlayerIdentityRepository identities;
     private readonly IProfileRepository profiles;
     private readonly TimeSpan disconnectGrace;
+    private readonly TimeSpan joinTimeout;
     private readonly GameplayTuningSettings gameplayTuning;
     private readonly object gate = new();
     private readonly Dictionary<string, RealtimeRoom> rooms = new(StringComparer.Ordinal);
@@ -38,6 +39,8 @@ public sealed class RealtimeMatchHub : IDisposable
         this.profiles = profiles;
         var seconds = configuration?.GetValue<int?>("Realtime:DisconnectGraceSeconds") ?? 30;
         disconnectGrace = TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 120));
+        var joinTimeoutSeconds = configuration?.GetValue<int?>("Realtime:JoinTimeoutSeconds") ?? 10;
+        joinTimeout = TimeSpan.FromSeconds(Math.Clamp(joinTimeoutSeconds, 1, 30));
         this.gameplayTuning = gameplayTuning ?? GameplayTuningSettings.From(configuration ?? new ConfigurationBuilder().Build());
     }
 
@@ -74,7 +77,22 @@ public sealed class RealtimeMatchHub : IDisposable
         RealtimePlayer? player = null;
         try
         {
-            var joinFrame = await ReceiveFrameAsync(socket, cancellationToken);
+            string? joinFrame;
+            var joinReceive = ReceiveFrameAsync(socket, cancellationToken);
+            var joinDeadline = Task.Delay(joinTimeout, cancellationToken);
+            if (await Task.WhenAny(joinReceive, joinDeadline) == joinReceive)
+            {
+                joinFrame = await joinReceive;
+            }
+            else
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await CloseAsync(socket, WebSocketCloseStatus.PolicyViolation, "join timeout", CancellationToken.None);
+                try { await joinReceive; }
+                catch (OperationCanceledException) { }
+                catch (WebSocketException) { }
+                return;
+            }
             if (joinFrame is null) return;
             if (!TryParseJoin(joinFrame, identities, out var playerId, out var displayName, out var archetype, out var error))
             {

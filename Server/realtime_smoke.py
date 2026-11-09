@@ -397,6 +397,11 @@ def main():
     clients = []
     first_room_player_ids = []
     try:
+        idle_client = WebSocketClient(address)
+        idle_close = idle_client.receive()
+        assert idle_close.get("type") == "close" and idle_close.get("code") == 1008, idle_close
+        idle_client.close()
+
         try:
             WebSocketClient(address, origin="https://untrusted.invalid")
             raise AssertionError("WebSocket accepted an origin outside Cors__AllowedOrigins")
@@ -686,7 +691,7 @@ def main():
                 continue
             assert message.get("type") != "match_result", message
 
-        print("Realtime WebSocket smoke passed: authenticated identity/matchmaking, 8-player cap, 30 Hz snapshots, server gem/power-up collection, Nitro/Mega-Bullet/Magnet effects, 12-second respawn, doubled sudden-death gems, authoritative combat, idempotent server-issued match reward receipt, boundary steps, bots, disconnect, and invalid-input rejection.")
+        print("Realtime WebSocket smoke passed: pre-join timeout, authenticated identity/matchmaking, 8-player cap, 30 Hz snapshots, server gem/power-up collection, Nitro/Mega-Bullet/Magnet effects, 12-second respawn, doubled sudden-death gems, authoritative combat, idempotent server-issued match reward receipt, boundary steps, bots, disconnect, and invalid-input rejection.")
     finally:
         for client in clients:
             if client is not None:
