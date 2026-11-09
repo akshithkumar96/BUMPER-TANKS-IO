@@ -123,3 +123,4 @@ Server/__pycache__/
 
 # Standalone ASP.NET service project (Unity's global rule ignores all csproj files)
 !/Server/BumperTanks.Server.csproj
+!/Tests/PostgresStorageIntegrationSmoke/PostgresStorageIntegrationSmoke.csproj
