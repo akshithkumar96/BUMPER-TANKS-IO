@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 
-public sealed class ProfileRepository
+public sealed class ProfileRepository : IProfileRepository
 {
     private readonly ConcurrentDictionary<string, PlayerProfile> profiles;
     private readonly HashSet<string> completedMatches = new();

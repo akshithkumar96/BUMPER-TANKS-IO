@@ -1,0 +1,34 @@
+services:
+  database:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: bumper_tanks
+      POSTGRES_USER: bumper
+      POSTGRES_PASSWORD: ${BUMPER_POSTGRES_PASSWORD:-bumper-local-development-only}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - bumper-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bumper -d bumper_tanks"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  service:
+    build:
+      context: ./Server
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_URLS: http://+:8080
+      Storage__Provider: PostgreSQL
+      ConnectionStrings__GameDatabase: Host=database;Port=5432;Database=bumper_tanks;Username=bumper;Password=${BUMPER_POSTGRES_PASSWORD:-bumper-local-development-only}
+      Cors__AllowedOrigins: ${BUMPER_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:8080}
+    ports:
+      - "8080:8080"
+
+volumes:
+  bumper-postgres-data:

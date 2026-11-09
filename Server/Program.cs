@@ -18,8 +18,9 @@ var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "http://lo
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
 var app = builder.Build();
-var profiles = new ProfileRepository(builder.Configuration);
-var identities = new PlayerIdentityRepository(builder.Configuration);
+var stores = GameStorageFactory.Create(builder.Configuration, builder.Environment);
+var profiles = stores.Profiles;
+var identities = stores.Identities;
 var telemetry = new TelemetryRepository(builder.Configuration);
 var crashReports = new CrashReportRepository(builder.Configuration);
 var gameplayTuning = GameplayTuningSettings.From(builder.Configuration);
@@ -191,7 +192,7 @@ app.MapPost("/v1/crash-reports", (CrashReportRequest request, HttpRequest httpRe
 app.MapGet("/v1/leaderboard", () => Results.Ok(new LeaderboardResponse(profiles.All.OrderByDescending(profile => profile.BattleCoins).Take(50).ToArray())));
 app.Run();
 
-static bool TryGetAuthenticatedPlayer(PlayerIdentityRepository identities, HttpRequest request, out string playerId)
+static bool TryGetAuthenticatedPlayer(IPlayerIdentityRepository identities, HttpRequest request, out string playerId)
 {
     var authorization = request.Headers.Authorization.ToString();
     var token = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? authorization[7..].Trim() : null;

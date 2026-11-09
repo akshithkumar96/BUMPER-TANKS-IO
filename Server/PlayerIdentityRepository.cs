@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 
 /// <summary>Issues opaque bearer credentials and persists only their SHA-256 hashes.</summary>
-public sealed class PlayerIdentityRepository
+public sealed class PlayerIdentityRepository : IPlayerIdentityRepository
 {
     private readonly string path;
     private readonly ConcurrentDictionary<string, string> playersByTokenHash;

@@ -20,8 +20,8 @@ public sealed class RealtimeMatchHub : IDisposable
     public static readonly TimeSpan BotFillDelay = TimeSpan.FromMilliseconds(2500);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly PlayerIdentityRepository identities;
-    private readonly ProfileRepository profiles;
+    private readonly IPlayerIdentityRepository identities;
+    private readonly IProfileRepository profiles;
     private readonly TimeSpan disconnectGrace;
     private readonly GameplayTuningSettings gameplayTuning;
     private readonly object gate = new();
@@ -31,7 +31,7 @@ public sealed class RealtimeMatchHub : IDisposable
     private int activeConnections;
     private bool disposed;
 
-    public RealtimeMatchHub(PlayerIdentityRepository identities, ProfileRepository profiles, IConfiguration? configuration = null,
+    public RealtimeMatchHub(IPlayerIdentityRepository identities, IProfileRepository profiles, IConfiguration? configuration = null,
         GameplayTuningSettings? gameplayTuning = null)
     {
         this.identities = identities;
@@ -195,7 +195,7 @@ public sealed class RealtimeMatchHub : IDisposable
         }
     }
 
-    private static bool TryParseJoin(string frame, PlayerIdentityRepository identities, out string playerId, out string displayName, out string archetype, out string error)
+    private static bool TryParseJoin(string frame, IPlayerIdentityRepository identities, out string playerId, out string displayName, out string archetype, out string error)
     {
         playerId = string.Empty;
         displayName = string.Empty;
@@ -317,7 +317,7 @@ public sealed class RealtimeMatchHub : IDisposable
         private readonly object sync = new();
         private readonly Dictionary<int, RealtimePlayer> players = new();
         private readonly Dictionary<string, RealtimePlayer> realParticipants = new(StringComparer.Ordinal);
-        private readonly ProfileRepository profiles;
+        private readonly IProfileRepository profiles;
         private readonly GameplayTuningSettings gameplayTuning;
         private readonly List<RealtimeShotSegment> shotSegments = new();
         private readonly List<RealtimeGemPickup> gems = new();
@@ -336,7 +336,7 @@ public sealed class RealtimeMatchHub : IDisposable
         private long matchStartedTimestamp;
         private bool disposed;
 
-        public RealtimeRoom(string roomId, ProfileRepository profiles, GameplayTuningSettings gameplayTuning)
+        public RealtimeRoom(string roomId, IProfileRepository profiles, GameplayTuningSettings gameplayTuning)
         {
             RoomId = roomId;
             this.profiles = profiles;

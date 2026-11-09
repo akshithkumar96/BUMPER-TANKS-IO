@@ -4,15 +4,35 @@ on:
   push:
     paths:
       - 'Server/**'
+      - 'Tests/PostgresStorageIntegrationSmoke/**'
       - '.github/workflows/server-ci.yml'
   pull_request:
     paths:
       - 'Server/**'
+      - 'Tests/PostgresStorageIntegrationSmoke/**'
       - '.github/workflows/server-ci.yml'
 
 jobs:
   build-and-smoke-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bumper
+          POSTGRES_PASSWORD: bumper-ci-password
+          POSTGRES_DB: bumper_tanks
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bumper -d bumper_tanks"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      ASPNETCORE_ENVIRONMENT: Production
+      Storage__Provider: PostgreSQL
+      ConnectionStrings__GameDatabase: Host=localhost;Port=5432;Database=bumper_tanks;Username=bumper;Password=bumper-ci-password
     defaults:
       run:
         working-directory: Server
@@ -24,15 +44,18 @@ jobs:
       - run: dotnet build BumperTanks.Server.csproj --configuration Release
       - run: dotnet build ../Tests/AdRewardRepositorySmoke/AdRewardRepositorySmoke.csproj --configuration Release
       - run: dotnet build ../Tests/CrashReportRepositorySmoke/CrashReportRepositorySmoke.csproj --configuration Release
+      - run: dotnet build ../Tests/PostgresStorageIntegrationSmoke/PostgresStorageIntegrationSmoke.csproj --configuration Release
       - run: dotnet run --no-build --configuration Release --project ../Tests/CrashReportRepositorySmoke/CrashReportRepositorySmoke.csproj
+      - name: Verify concurrent PostgreSQL storage
+        run: dotnet run --no-build --configuration Release --project ../Tests/PostgresStorageIntegrationSmoke/PostgresStorageIntegrationSmoke.csproj
       - name: Start service and verify health and rewards
         run: |
           set -euo pipefail
-          export Storage__ProfilePath="$RUNNER_TEMP/bumper-profiles.json"
-          export Storage__IdentityPath="$RUNNER_TEMP/bumper-identities.json"
           export Storage__TelemetryPath="$RUNNER_TEMP/bumper-telemetry.json"
           export Storage__CrashReportPath="$RUNNER_TEMP/bumper-crash-reports.json"
           export ASPNETCORE_ENVIRONMENT=Production
+          export Storage__Provider=PostgreSQL
+          export ConnectionStrings__GameDatabase="Host=localhost;Port=5432;Database=bumper_tanks;Username=bumper;Password=bumper-ci-password"
           export Realtime__DisconnectGraceSeconds=2
           export REALTIME_DISCONNECT_GRACE_SECONDS=2
           export Rewards__RequireMatchAttestation=true
