@@ -248,6 +248,79 @@ def smoke_reconnect(address, grace_seconds):
     print("Realtime reconnect smoke passed: identity and slot resume with retained state, restarted input ticks, duplicate sockets rejected, grace expiry creates a fresh room and slot.")
 
 
+def smoke_latency_and_jitter(address):
+    base_delay_ms = min(250, max(20, int(os.environ.get("REALTIME_SMOKE_ONE_WAY_DELAY_MS", "80"))))
+    jitter_ms = min(100, max(0, int(os.environ.get("REALTIME_SMOKE_JITTER_MS", "40"))), base_delay_ms - 20)
+    jitter_pattern = (-jitter_ms, jitter_ms, -(jitter_ms // 2), jitter_ms // 2)
+    clients = []
+    try:
+        player, player_join = join(address, "latency")
+        clients.append(player)
+        target, _ = join(address, "latency-target")
+        clients.append(target)
+        player_id = player_join["playerId"]
+        initial = wait_for(player, lambda message: message.get("type") == "snapshot" and
+                           any(state["playerId"] == player_id for state in message.get("players", [])))
+        last_tick = initial["tick"]
+
+        movements = ((1, 0), (0, 1), (-1, 0), (0, -1))
+        delays = []
+        for index in range(8):
+            delay_ms = base_delay_ms + jitter_pattern[index % len(jitter_pattern)]
+            delays.append(delay_ms)
+            time.sleep(delay_ms / 1000)
+            movement = movements[index % len(movements)]
+            player.send({"type": "input", "tick": index + 1,
+                         "movement": {"x": movement[0], "y": movement[1]},
+                         "aim": {"x": 0, "y": 1}, "fire": False, "ability": False})
+
+        def observe_snapshots(minimum_count, require_projectile=False, enforce_movement_speed=True):
+            nonlocal last_tick
+            deadline = time.monotonic() + 2.0
+            observed = 0
+            projectile_seen = False
+            while time.monotonic() < deadline:
+                try:
+                    message = player.messages.get(timeout=min(0.1, deadline - time.monotonic()))
+                except queue.Empty:
+                    continue
+                if message.get("type") == "error":
+                    raise AssertionError(f"Realtime input rejected under simulated latency: {message}")
+                if message.get("type") != "snapshot":
+                    continue
+                tick = message.get("tick")
+                assert isinstance(tick, int) and tick > last_tick, (last_tick, tick)
+                last_tick = tick
+                observed += 1
+                bounds = message["arenaBounds"]
+                player_state = next((state for state in message["players"] if state["playerId"] == player_id), None)
+                assert player_state is not None, message
+                position = player_state["position"]
+                velocity = player_state["velocity"]
+                tolerance = 0.02
+                assert abs(position["x"]) <= bounds["halfWidth"] + tolerance, (position, bounds)
+                assert abs(position["y"]) <= bounds["halfHeight"] + tolerance, (position, bounds)
+                if enforce_movement_speed:
+                    assert math.hypot(velocity["x"], velocity["y"]) <= 8.05, velocity
+                projectile_seen = projectile_seen or any(shot["ownerPlayerId"] == player_id
+                                                         for shot in message.get("shots", []))
+                if observed >= minimum_count and (projectile_seen or not require_projectile):
+                    return observed, projectile_seen
+            raise AssertionError(f"Timed out observing latency snapshots/projectile; observed={observed}, projectile={projectile_seen}")
+
+        observed, _ = observe_snapshots(8)
+        fire_delay_ms = base_delay_ms + jitter_ms
+        time.sleep(fire_delay_ms / 1000)
+        player.send({"type": "input", "tick": 9, "movement": {"x": 0, "y": 0},
+                     "aim": {"x": 0, "y": 1}, "fire": True, "ability": False})
+        _, projectile_seen = observe_snapshots(1, require_projectile=True, enforce_movement_speed=False)
+        assert projectile_seen
+        print(f"Realtime latency smoke passed: deterministic one-way delays {min(delays)}–{max(delays)} ms with {jitter_ms} ms jitter, {observed} monotonic bounded snapshots, delayed fire action.")
+    finally:
+        for client in clients:
+            client.close()
+
+
 def drive_toward_pickups(clients, player_ids, snapshot, pickup_ids):
     pickups = {pickup["pickupId"]: pickup["position"] for pickup in snapshot["powerUps"]}
     vectors = []
@@ -431,6 +504,9 @@ def main():
     if len(sys.argv) > 2 and sys.argv[2] == "--reconnect-only":
         smoke_reconnect(address, float(os.environ.get("REALTIME_DISCONNECT_GRACE_SECONDS", "30")))
         return
+    if len(sys.argv) > 2 and sys.argv[2] == "--latency-only":
+        smoke_latency_and_jitter(address)
+        return
     clients = []
     first_room_player_ids = []
     try:
@@ -452,6 +528,7 @@ def main():
         assert_join_rejected(address, second_identity["playerId"], first_identity["accessToken"])
 
         smoke_reconnect(address, float(os.environ.get("REALTIME_DISCONNECT_GRACE_SECONDS", "30")))
+        smoke_latency_and_jitter(address)
 
         first, first_join = join(address, 1, origin="http://localhost:5173")
         clients.append(first)

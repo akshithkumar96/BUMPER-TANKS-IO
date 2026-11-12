@@ -59,6 +59,8 @@ jobs:
           export Realtime__DisconnectGraceSeconds=2
           export Realtime__JoinTimeoutSeconds=2
           export REALTIME_DISCONNECT_GRACE_SECONDS=2
+          export REALTIME_SMOKE_ONE_WAY_DELAY_MS=80
+          export REALTIME_SMOKE_JITTER_MS=40
           export Rewards__RequireMatchAttestation=true
           export Rewards__MatchAttestationSecret=ci-only-match-attestation-secret-32-bytes-minimum
           export Rewards__LevelPlayPrivateKey=ci-only-levelplay-reward-signing-key
