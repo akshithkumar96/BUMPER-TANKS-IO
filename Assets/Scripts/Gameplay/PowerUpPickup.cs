@@ -7,6 +7,7 @@ namespace BumperTanks.Gameplay
     public sealed class PowerUpPickup : MonoBehaviour
     {
         public PowerUpType Type { get; set; }
+        public bool IsCollected { get; private set; }
 
         public void Configure(PowerUpType type, Color color)
         {
@@ -22,9 +23,21 @@ namespace BumperTanks.Gameplay
         {
             var tank = other.GetComponent<TankController2D>();
             if (tank == null) return;
+            if (!TryConsume()) return;
             tank.ApplyPowerUp(Type);
             MatchDirector.Instance?.SchedulePowerUpRespawn(Type);
             Destroy(gameObject);
+        }
+
+        /// <summary>
+        /// Atomically claims this pickup for the current frame. Unity defers Destroy, so
+        /// overlapping tank triggers must not enqueue more than one respawn.
+        /// </summary>
+        public bool TryConsume()
+        {
+            if (IsCollected) return false;
+            IsCollected = true;
+            return true;
         }
     }
 }
