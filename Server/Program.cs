@@ -1,17 +1,33 @@
 using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("rewards", limiter =>
-{
-    limiter.PermitLimit = 60;
-    limiter.Window = TimeSpan.FromMinutes(1);
-    limiter.QueueLimit = 0;
-}).AddFixedWindowLimiter("crash-reports", limiter =>
-{
-    limiter.PermitLimit = 10;
-    limiter.Window = TimeSpan.FromMinutes(1);
-    limiter.QueueLimit = 0;
-}));
+IPlayerIdentityRepository? identitiesForRateLimits = null;
+builder.Services.AddRateLimiter(options => options
+    .AddPolicy("identity", context => RateLimitPartition.GetFixedWindowLimiter(
+        GetClientRateLimitPartition(context, identitiesForRateLimits), _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }))
+    .AddPolicy("rewards", context => RateLimitPartition.GetFixedWindowLimiter(
+        GetClientRateLimitPartition(context, identitiesForRateLimits), _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }))
+    .AddPolicy("crash-reports", context => RateLimitPartition.GetFixedWindowLimiter(
+        GetClientRateLimitPartition(context, identitiesForRateLimits), _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        })));
 builder.Services.Configure<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>(options =>
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests);
 var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "http://localhost:5173,http://localhost:8080")
@@ -28,6 +44,7 @@ var realtimeLease = usesPostgresStorage
     : null;
 var profiles = stores.Profiles;
 var identities = stores.Identities;
+identitiesForRateLimits = identities;
 var telemetry = stores.Telemetry;
 var crashReports = stores.CrashReports;
 var gameplayTuning = GameplayTuningSettings.From(builder.Configuration);
@@ -74,7 +91,7 @@ app.MapPost("/v1/identity/anonymous", () =>
 {
     var identity = identities.CreateAnonymous();
     return Results.Ok(new AnonymousIdentityResponse(identity.PlayerId, identity.AccessToken));
-}).RequireRateLimiting("rewards");
+}).RequireRateLimiting("identity");
 
 app.MapGet("/v1/profiles/{playerId}", (string playerId, HttpRequest request) =>
 {
@@ -82,7 +99,7 @@ app.MapGet("/v1/profiles/{playerId}", (string playerId, HttpRequest request) =>
     if (!string.Equals(playerId, authenticatedPlayerId, StringComparison.Ordinal)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     if (!RequestValidation.IsPlayerId(playerId)) return Results.BadRequest(new { error = "invalid playerId" });
     return Results.Ok(profiles.GetOrCreate(playerId));
-});
+}).RequireRateLimiting("rewards");
 
 app.MapPost("/v1/rewards/daily", (DailyRewardRequest request, HttpRequest httpRequest) =>
 {
@@ -206,9 +223,26 @@ app.Run();
 
 static bool TryGetAuthenticatedPlayer(IPlayerIdentityRepository identities, HttpRequest request, out string playerId)
 {
+    const string cacheKey = "BumperTanks.AuthenticatedPlayerId";
+    if (request.HttpContext.Items.TryGetValue(cacheKey, out var cachedPlayerId) && cachedPlayerId is string cached)
+    {
+        playerId = cached;
+        return cached.Length > 0;
+    }
+
     var authorization = request.Headers.Authorization.ToString();
     var token = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? authorization[7..].Trim() : null;
-    return identities.TryAuthenticate(token, out playerId);
+    var authenticated = identities.TryAuthenticate(token, out playerId);
+    request.HttpContext.Items[cacheKey] = authenticated ? playerId : string.Empty;
+    return authenticated;
+}
+
+static string GetClientRateLimitPartition(HttpContext context, IPlayerIdentityRepository? identities)
+{
+    if (identities is not null && TryGetAuthenticatedPlayer(identities, context.Request, out var playerId))
+        return $"player:{playerId}";
+
+    return $"ip:{context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "unknown"}";
 }
 
 public sealed record PlayerProfile(string PlayerId, int BattleCoins, int MatchesPlayed, DateOnly LastDailyRewardUtc)

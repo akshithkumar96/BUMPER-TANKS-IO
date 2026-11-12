@@ -71,6 +71,7 @@ jobs:
           for i in {1..10}; do if curl --fail --silent http://127.0.0.1:5188/health; then healthy=true; break; fi; sleep 1; done
           test "$healthy" = true
           python3 gameplay_tuning_smoke.py http://127.0.0.1:5188
+          python3 rate_limit_smoke.py http://127.0.0.1:5188
           python3 realtime_smoke.py http://127.0.0.1:5188
           python3 ad_reward_smoke.py http://127.0.0.1:5188
           python3 crash_report_smoke.py http://127.0.0.1:5188
