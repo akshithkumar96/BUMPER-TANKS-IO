@@ -58,5 +58,59 @@ namespace BumperTanks.Tests
             Assert.That(menu.TelemetryStatus.xMin, Is.GreaterThanOrEqualTo(safe.xMin));
             Assert.That(menu.TelemetryStatus.xMax, Is.LessThanOrEqualTo(safe.xMax));
         }
+
+        [TestCase(390f, 844f)]
+        [TestCase(320f, 568f)]
+        [TestCase(1280f, 720f)]
+        public void DevelopmentServerButtonFitsMainMenu(float width, float height)
+        {
+            var safe = GuiSafeAreaLayout.ToGuiRect(new Rect(0f, 0f, width, height), height, 8f);
+            var menu = GuiSafeAreaLayout.FrontMenu(safe, true);
+
+            Assert.That(menu.DevelopmentServerButton.width, Is.GreaterThanOrEqualTo(200f));
+            Assert.That(menu.DevelopmentServerButton.height, Is.EqualTo(44f));
+            Assert.That(menu.DevelopmentServerButton.xMin, Is.GreaterThanOrEqualTo(menu.Panel.xMin));
+            Assert.That(menu.DevelopmentServerButton.xMax, Is.LessThanOrEqualTo(menu.Panel.xMax));
+            Assert.That(menu.CurrencyLabel.yMax, Is.LessThanOrEqualTo(menu.DevelopmentServerButton.yMin));
+            Assert.That(menu.DevelopmentServerButton.yMax, Is.LessThanOrEqualTo(menu.Panel.yMax));
+        }
+
+        [Test]
+        public void StandardMainMenuDoesNotExposeDevelopmentServerButton()
+        {
+            var menu = GuiSafeAreaLayout.FrontMenu(new Rect(8f, 8f, 374f, 828f));
+
+            Assert.That(menu.DevelopmentServerButton, Is.EqualTo(default(Rect)));
+        }
+
+        [TestCase(390f, 844f)]
+        [TestCase(320f, 568f)]
+        [TestCase(1280f, 720f)]
+        public void DevelopmentServerFormFitsSafeAreaAndKeepsTouchTargets(float width, float height)
+        {
+            var safe = GuiSafeAreaLayout.ToGuiRect(new Rect(0f, 0f, width, height), height, 8f);
+            var form = GuiSafeAreaLayout.DevelopmentServerSettings(safe);
+
+            AssertInside(form.Panel, safe);
+            AssertInside(form.HelpText, form.Panel);
+            AssertInside(form.ApiUrlField, form.Panel);
+            AssertInside(form.StatusText, form.Panel);
+            AssertInside(form.SaveButton, form.Panel);
+            AssertInside(form.CloseButton, form.Panel);
+            Assert.That(form.ApiUrlField.height, Is.EqualTo(44f));
+            Assert.That(form.SaveButton.height, Is.EqualTo(44f));
+            Assert.That(form.CloseButton.height, Is.EqualTo(44f));
+            Assert.That(form.HelpText.yMax, Is.LessThanOrEqualTo(form.ApiUrlField.yMin));
+            Assert.That(form.ApiUrlField.yMax, Is.LessThanOrEqualTo(form.StatusText.yMin));
+            Assert.That(form.StatusText.yMax, Is.LessThanOrEqualTo(form.SaveButton.yMin));
+        }
+
+        private static void AssertInside(Rect frame, Rect bounds)
+        {
+            Assert.That(frame.xMin, Is.GreaterThanOrEqualTo(bounds.xMin));
+            Assert.That(frame.yMin, Is.GreaterThanOrEqualTo(bounds.yMin));
+            Assert.That(frame.xMax, Is.LessThanOrEqualTo(bounds.xMax));
+            Assert.That(frame.yMax, Is.LessThanOrEqualTo(bounds.yMax));
+        }
     }
 }

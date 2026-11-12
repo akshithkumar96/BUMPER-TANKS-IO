@@ -7,6 +7,8 @@ namespace BumperTanks.Frontend
     public sealed class ServiceEndpointSettings : ScriptableObject
     {
         public const string ResourceName = "ServiceEndpointSettings";
+        public const string DevelopmentApiOverridePlayerPrefsKey = "bumper-tanks.development-api-base-url.v1";
+        public const string DevelopmentRealtimeOverridePlayerPrefsKey = "bumper-tanks.realtime-endpoint";
 
         [SerializeField] private string apiBaseUrl = string.Empty;
         [SerializeField] private string realtimeWebSocketUrl = string.Empty;
@@ -78,6 +80,26 @@ namespace BumperTanks.Frontend
                 return false;
             }
             normalized = uri.AbsoluteUri.TrimEnd('/');
+            return true;
+        }
+
+        public static bool TryValidateDevelopmentApiOverride(string candidate, bool developmentBuild,
+            out ResolvedServiceEndpoints endpoints, out string error)
+        {
+            endpoints = default;
+            if (!developmentBuild)
+            {
+                error = "Server URL overrides are only available in Development builds.";
+                return false;
+            }
+
+            var api = (candidate ?? string.Empty).Trim();
+            if (api.Length == 0)
+            {
+                error = "Enter the development API base URL, for example http://192.168.1.20:5188.";
+                return false;
+            }
+            if (!TryResolve(api, string.Empty, true, out endpoints, out error)) return false;
             return true;
         }
 

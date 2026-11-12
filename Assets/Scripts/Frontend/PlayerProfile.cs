@@ -42,6 +42,13 @@ namespace BumperTanks.Frontend
             PlayerPrefs.Save();
         }
 
+        public static void ClearServerIdentity()
+        {
+            PlayerPrefs.DeleteKey(ServerPlayerIdKey);
+            PlayerPrefs.DeleteKey(AccessTokenKey);
+            PlayerPrefs.Save();
+        }
+
         public static PlayerProfile Load()
         {
             var stored = PlayerPrefs.GetString(ProfileKey, string.Empty);

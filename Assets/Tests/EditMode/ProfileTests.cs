@@ -41,6 +41,46 @@ namespace BumperTanks.Tests
         }
 
         [Test]
+        public void ClearingServerIdentityPreservesLocalPlayerAndCosmetics()
+        {
+            var originalProfile = ProfileStore.Load();
+            var originalServerId = ProfileStore.GetServerPlayerId();
+            var originalToken = ProfileStore.GetAccessToken();
+            var localId = ProfileStore.GetOrCreatePlayerId();
+            try
+            {
+                ProfileStore.Save(new PlayerProfile
+                {
+                    BattleCoins = 275,
+                    ColorId = "coral",
+                    TrailId = "neon",
+                    FlagId = "flag_checkered",
+                    BumpSoundId = "sound_arcade",
+                    OwnedCosmetics = new[] { "flag_checkered", "sound_arcade" }
+                });
+                ProfileStore.SaveServerIdentity("old-host-player", "old-host-token");
+
+                ProfileStore.ClearServerIdentity();
+
+                Assert.That(ProfileStore.GetServerPlayerId(), Is.Empty);
+                Assert.That(ProfileStore.GetAccessToken(), Is.Empty);
+                Assert.That(ProfileStore.GetOrCreatePlayerId(), Is.EqualTo(localId));
+                var profile = ProfileStore.Load();
+                Assert.That(profile.BattleCoins, Is.EqualTo(275));
+                Assert.That(profile.ColorId, Is.EqualTo("coral"));
+                Assert.That(profile.TrailId, Is.EqualTo("neon"));
+                Assert.That(profile.FlagId, Is.EqualTo("flag_checkered"));
+                Assert.That(profile.BumpSoundId, Is.EqualTo("sound_arcade"));
+                Assert.That(profile.OwnedCosmetics, Is.EqualTo(new[] { "flag_checkered", "sound_arcade" }));
+            }
+            finally
+            {
+                ProfileStore.Save(originalProfile);
+                ProfileStore.SaveServerIdentity(originalServerId, originalToken);
+            }
+        }
+
+        [Test]
         public void AccessibleFramesConvertImmediateGuiCoordinatesToScreenCoordinates()
         {
             var frame = AccessibleUiFrames.ToScreen(new UnityEngine.Rect(12f, 20f, 112f, 44f), 640f);

@@ -15,6 +15,9 @@ namespace BumperTanks.Frontend
         public string ApiBaseUrl { get; private set; }
         public string RealtimeEndpoint { get; private set; }
 
+        private Coroutine identityInitialization;
+        private int identityGeneration;
+
         private void Awake()
         {
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
@@ -23,8 +26,31 @@ namespace BumperTanks.Frontend
             RemoteGameplayTuning.LoadCached();
             var settings = ServiceEndpointSettings.Load();
             var isDevelopmentBuild = Application.isEditor || Debug.isDebugBuild;
-            if (ServiceEndpointSettings.TryResolve(settings != null ? settings.ApiBaseUrl : string.Empty,
-                settings != null ? settings.RealtimeWebSocketUrl : string.Empty, isDevelopmentBuild,
+            var configuredApiBaseUrl = settings != null ? settings.ApiBaseUrl : string.Empty;
+            var configuredRealtimeUrl = settings != null ? settings.RealtimeWebSocketUrl : string.Empty;
+            var developmentApiOverride = PlayerPrefs.GetString(ServiceEndpointSettings.DevelopmentApiOverridePlayerPrefsKey, string.Empty);
+            if (isDevelopmentBuild && !string.IsNullOrWhiteSpace(developmentApiOverride))
+            {
+                if (ServiceEndpointSettings.TryValidateDevelopmentApiOverride(developmentApiOverride, true, out var overrideEndpoints, out var overrideError))
+                {
+                    configuredApiBaseUrl = overrideEndpoints.ApiBaseUrl;
+                    configuredRealtimeUrl = overrideEndpoints.RealtimeWebSocketUrl;
+                }
+                else
+                {
+                    Debug.LogWarning("Ignoring invalid saved development API URL: " + overrideError);
+                    PlayerPrefs.DeleteKey(ServiceEndpointSettings.DevelopmentApiOverridePlayerPrefsKey);
+                    PlayerPrefs.Save();
+                }
+            }
+            else if (!isDevelopmentBuild && PlayerPrefs.HasKey(ServiceEndpointSettings.DevelopmentApiOverridePlayerPrefsKey))
+            {
+                PlayerPrefs.DeleteKey(ServiceEndpointSettings.DevelopmentApiOverridePlayerPrefsKey);
+                PlayerPrefs.Save();
+            }
+
+            if (ServiceEndpointSettings.TryResolve(configuredApiBaseUrl,
+                configuredRealtimeUrl, isDevelopmentBuild,
                 out var endpoints, out var endpointError))
             {
                 ApiBaseUrl = endpoints.ApiBaseUrl;
@@ -41,7 +67,37 @@ namespace BumperTanks.Frontend
             if (GetComponent<LevelPlayRewardedSpinService>() == null) gameObject.AddComponent<LevelPlayRewardedSpinService>();
 #endif
             if (GetComponent<CrashReporter>() == null) gameObject.AddComponent<CrashReporter>();
-            if (EndpointConfigurationValid) StartCoroutine(InitializeIdentity());
+            if (EndpointConfigurationValid) StartIdentityInitialization();
+        }
+
+        public bool ConfigureDevelopmentApiBaseUrl(string candidate, out string error)
+        {
+            var isDevelopmentBuild = Application.isEditor || Debug.isDebugBuild;
+            if (!ServiceEndpointSettings.TryValidateDevelopmentApiOverride(candidate, isDevelopmentBuild,
+                    out var endpoints, out error)) return false;
+
+            var endpointChanged = !string.Equals(ApiBaseUrl, endpoints.ApiBaseUrl, StringComparison.OrdinalIgnoreCase);
+            PlayerPrefs.SetString(ServiceEndpointSettings.DevelopmentApiOverridePlayerPrefsKey, endpoints.ApiBaseUrl);
+            PlayerPrefs.DeleteKey(ServiceEndpointSettings.DevelopmentRealtimeOverridePlayerPrefsKey);
+            PlayerPrefs.Save();
+
+            if (endpointChanged) ProfileStore.ClearServerIdentity();
+            ApiBaseUrl = endpoints.ApiBaseUrl;
+            RealtimeEndpoint = endpoints.RealtimeWebSocketUrl;
+            EndpointConfigurationValid = true;
+            EndpointConfigurationError = null;
+            error = null;
+            if (endpointChanged || !IdentityReady) StartIdentityInitialization();
+            return true;
+        }
+
+        private void StartIdentityInitialization()
+        {
+            identityGeneration++;
+            if (identityInitialization != null) StopCoroutine(identityInitialization);
+            IdentityReady = false;
+            IdentityError = null;
+            identityInitialization = StartCoroutine(InitializeIdentity(identityGeneration));
         }
 
         public void ConnectRealtime(BumperTanks.Network.WebSocketRealtimeSession session, string url, string displayName, string archetype, Action<string> onError = null)
@@ -70,7 +126,7 @@ namespace BumperTanks.Frontend
             session.Connect(url, ProfileStore.GetServerPlayerId(), displayName, archetype, ProfileStore.GetAccessToken());
         }
 
-        private IEnumerator InitializeIdentity()
+        private IEnumerator InitializeIdentity(int generation)
         {
             if (!EndpointConfigurationValid) yield break;
             var existingId = ProfileStore.GetServerPlayerId();
@@ -78,6 +134,7 @@ namespace BumperTanks.Frontend
             if (!string.IsNullOrEmpty(existingId) && !string.IsNullOrEmpty(existingToken))
             {
                 yield return FetchGameplayTuning();
+                if (generation != identityGeneration) yield break;
                 IdentityReady = true;
                 yield break;
             }
@@ -86,6 +143,7 @@ namespace BumperTanks.Frontend
             request.uploadHandler = new UploadHandlerRaw(Array.Empty<byte>());
             request.downloadHandler = new DownloadHandlerBuffer();
             yield return request.SendWebRequest();
+            if (generation != identityGeneration) yield break;
             if (request.result != UnityWebRequest.Result.Success)
             {
                 IdentityError = request.error;
@@ -99,6 +157,7 @@ namespace BumperTanks.Frontend
             }
             ProfileStore.SaveServerIdentity(identity.playerId, identity.accessToken);
             yield return FetchGameplayTuning();
+            if (generation != identityGeneration) yield break;
             IdentityReady = true;
         }
 

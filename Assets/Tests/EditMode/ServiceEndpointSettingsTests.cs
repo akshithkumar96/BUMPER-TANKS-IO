@@ -64,5 +64,39 @@ namespace BumperTanks.Tests
             Assert.That(valid, Is.False);
             Assert.That(error, Does.Contain("wss://"));
         }
+
+        [Test]
+        public void DevelopmentApiOverrideNormalizesUrlAndDerivesRealtimeEndpoint()
+        {
+            var valid = ServiceEndpointSettings.TryValidateDevelopmentApiOverride(
+                " http://192.168.1.20:5188/game/ ", true, out var endpoints, out var error);
+
+            Assert.That(valid, Is.True, error);
+            Assert.That(endpoints.ApiBaseUrl, Is.EqualTo("http://192.168.1.20:5188/game"));
+            Assert.That(endpoints.RealtimeWebSocketUrl, Is.EqualTo("ws://192.168.1.20:5188/game/v1/realtime"));
+        }
+
+        [TestCase("")]
+        [TestCase("ftp://192.168.1.20:5188")]
+        [TestCase("http://user:pass@192.168.1.20:5188")]
+        [TestCase("http://192.168.1.20:5188?mode=dev")]
+        [TestCase("http://192.168.1.20:5188#fragment")]
+        public void DevelopmentApiOverrideRejectsInvalidUrls(string candidate)
+        {
+            var valid = ServiceEndpointSettings.TryValidateDevelopmentApiOverride(candidate, true, out _, out var error);
+
+            Assert.That(valid, Is.False);
+            Assert.That(error, Is.Not.Empty);
+        }
+
+        [Test]
+        public void ReleaseBuildCannotUseDevelopmentApiOverride()
+        {
+            var valid = ServiceEndpointSettings.TryValidateDevelopmentApiOverride(
+                "http://192.168.1.20:5188", false, out _, out var error);
+
+            Assert.That(valid, Is.False);
+            Assert.That(error, Does.Contain("Development"));
+        }
     }
 }

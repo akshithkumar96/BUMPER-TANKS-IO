@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Xml.Linq;
 using BumperTanks.Frontend;
 using UnityEditor;
 using UnityEditor.Build;
@@ -19,18 +20,55 @@ namespace BumperTanks.Editor
             var targetGroup = BuildTargetGroup.Android;
             var previousBackend = PlayerSettings.GetScriptingBackend(targetGroup);
             var previousAndroidArchitectures = PlayerSettings.Android.targetArchitectures;
+            var androidPluginDirectory = Path.Combine("Assets", "Plugins", "Android");
+            var manifestPath = Path.Combine(androidPluginDirectory, "AndroidManifest.xml");
+            var metaPath = manifestPath + ".meta";
+            var hadManifest = File.Exists(manifestPath);
+            var hadMeta = File.Exists(metaPath);
+            var originalManifest = hadManifest ? File.ReadAllText(manifestPath) : null;
             try
             {
                 // Keep the fast Development APK path separate from release backend settings.
                 PlayerSettings.SetScriptingBackend(targetGroup, ScriptingImplementation.Mono2x);
                 PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARMv7;
+                Directory.CreateDirectory(androidPluginDirectory);
+                File.WriteAllText(manifestPath, AddDevelopmentCleartextPolicy(originalManifest));
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
                 Build(BuildTarget.Android, true);
             }
             finally
             {
-                PlayerSettings.SetScriptingBackend(targetGroup, previousBackend);
-                PlayerSettings.Android.targetArchitectures = previousAndroidArchitectures;
+                try
+                {
+                    if (hadManifest) File.WriteAllText(manifestPath, originalManifest);
+                    else if (File.Exists(manifestPath)) File.Delete(manifestPath);
+                    if (!hadMeta && File.Exists(metaPath)) File.Delete(metaPath);
+                    AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                }
+                finally
+                {
+                    PlayerSettings.SetScriptingBackend(targetGroup, previousBackend);
+                    PlayerSettings.Android.targetArchitectures = previousAndroidArchitectures;
+                }
             }
+        }
+
+        private static string AddDevelopmentCleartextPolicy(string existingManifest)
+        {
+            XNamespace android = "http://schemas.android.com/apk/res/android";
+            var document = string.IsNullOrWhiteSpace(existingManifest)
+                ? new XDocument(new XElement("manifest"))
+                : XDocument.Parse(existingManifest);
+            var manifest = document.Root ?? throw new InvalidDataException("The Android manifest has no root element.");
+            var applicationName = manifest.Name.Namespace + "application";
+            var application = manifest.Element(applicationName);
+            if (application == null)
+            {
+                application = new XElement(applicationName);
+                manifest.Add(application);
+            }
+            application.SetAttributeValue(android + "usesCleartextTraffic", "true");
+            return document.ToString(SaveOptions.DisableFormatting);
         }
         public static void BuildWindowsDevelopment() => Build(BuildTarget.StandaloneWindows64, true);
         public static void BuildWebGlDevelopment() => Build(BuildTarget.WebGL, true);

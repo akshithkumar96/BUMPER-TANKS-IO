@@ -11,7 +11,7 @@ namespace BumperTanks.Gameplay
 {
     public sealed class ArenaBootstrap : MonoBehaviour
     {
-        public const string RealtimeEndpointPlayerPrefsKey = "bumper-tanks.realtime-endpoint";
+        public const string RealtimeEndpointPlayerPrefsKey = ServiceEndpointSettings.DevelopmentRealtimeOverridePlayerPrefsKey;
         private static ArenaBootstrap current;
         private string realtimeEndpoint;
         private string endpointOverrideError;
@@ -42,6 +42,9 @@ namespace BumperTanks.Gameplay
         private bool onlineMatch;
         private bool onlineMatchResultReceived;
         private bool showFrontMenu = true;
+        private bool showDevelopmentServerSettings;
+        private string developmentApiDraft = string.Empty;
+        private string developmentServerStatus = string.Empty;
         private bool matchStarted;
         private bool resultAccessibilityShown;
         private AccessibleUiBridge accessibleUi;
@@ -52,8 +55,13 @@ namespace BumperTanks.Gameplay
             var serviceClient = FindFirstObjectByType<GameServiceClient>();
             if (serviceClient == null) serviceClient = new GameObject("Game Service Client").AddComponent<GameServiceClient>();
             realtimeEndpoint = serviceClient.RealtimeEndpoint;
+            var endpointSettings = ServiceEndpointSettings.Load();
+            developmentApiDraft = PlayerPrefs.GetString(ServiceEndpointSettings.DevelopmentApiOverridePlayerPrefsKey,
+                endpointSettings != null ? endpointSettings.ApiBaseUrl : string.Empty);
+            var apiOverrideConfigured = !string.IsNullOrWhiteSpace(
+                PlayerPrefs.GetString(ServiceEndpointSettings.DevelopmentApiOverridePlayerPrefsKey, string.Empty));
             var configuredEndpoint = PlayerPrefs.GetString(RealtimeEndpointPlayerPrefsKey, string.Empty);
-            if (!string.IsNullOrWhiteSpace(configuredEndpoint))
+            if (!apiOverrideConfigured && !string.IsNullOrWhiteSpace(configuredEndpoint))
             {
                 var isDevelopmentBuild = Application.isEditor || Debug.isDebugBuild;
                 if (ServiceEndpointSettings.TryValidateRealtimeOverride(configuredEndpoint, isDevelopmentBuild, out var normalized, out var error))
@@ -111,6 +119,7 @@ namespace BumperTanks.Gameplay
 
         private void Update()
         {
+            UpdateDevelopmentServerStatus();
             UpdateRealtimeInput();
             UpdateRemoteTanks();
             var resultReady = onlineMatch ? onlinePhase == "finished" : match != null && (match.Winner != null || match.Phase == MatchPhase.Complete);
@@ -130,7 +139,8 @@ namespace BumperTanks.Gameplay
             var safe = GuiSafeAreaLayout.Current;
             if (showFrontMenu)
             {
-                var menu = GuiSafeAreaLayout.FrontMenu(safe);
+                var showDevelopmentServerButton = IsDevelopmentBuild;
+                var menu = GuiSafeAreaLayout.FrontMenu(safe, showDevelopmentServerButton);
                 var panel = menu.Panel;
                 GUI.Box(panel, "BUMPER TANKS IO");
                 GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 140f, panel.y + 45f, 280f, 25f), safe), "Top down arena brawler");
@@ -151,6 +161,13 @@ namespace BumperTanks.Gameplay
                 if (GUI.Button(menu.AllowButton, "Allow")) SetTelemetryConsent(true);
                 if (GUI.Button(menu.DeclineButton, "No thanks")) SetTelemetryConsent(false);
                 GUI.Label(menu.CurrencyLabel, $"Battle Coins: {ProfileStore.Load().BattleCoins}");
+                if (showDevelopmentServerButton && GUI.Button(menu.DevelopmentServerButton, "Server URL (Dev)"))
+                    OpenDevelopmentServerSettings();
+                if (showDevelopmentServerSettings)
+                {
+                    DrawDevelopmentServerSettings(safe);
+                    return;
+                }
                 return;
             }
             GUI.Box(GuiSafeAreaLayout.Clamp(new Rect(safe.x + 4f, safe.y + 4f, 345, 92), safe), onlineMatch ? "BUMPER TANKS IO - Online Arena" : "BUMPER TANKS IO - Offline Arena");
@@ -288,9 +305,10 @@ namespace BumperTanks.Gameplay
 
         private void ShowMainMenuAccessibility()
         {
-            var menu = GuiSafeAreaLayout.FrontMenu(GuiSafeAreaLayout.Current);
+            var showDevelopmentServerButton = IsDevelopmentBuild;
+            var menu = GuiSafeAreaLayout.FrontMenu(GuiSafeAreaLayout.Current, showDevelopmentServerButton);
             var panel = menu.Panel;
-            accessibleUi?.ShowScreen("Bumper Tanks main menu", new AccessibleUiAction[]
+            var actions = new List<AccessibleUiAction>
             {
                 new("Play Arena", "Start the local arena match. Telemetry choice is optional.", MenuFrame(panel, -115f, -70f, 230f, 40f), BeginArena),
                 new("Garage", "Change tank color or trail and claim the daily reward.", MenuFrame(panel, -115f, -20f, 110f, 34f), OpenGarageFromMenu),
@@ -301,6 +319,87 @@ namespace BumperTanks.Gameplay
                     menu.TelemetryStatus, null, false),
                 new("Allow gameplay sharing", "Send gameplay activity linked to this game profile to help improve balance. No name or email is sent.", menu.AllowButton, () => SetTelemetryConsent(true)),
                 new("No thanks", "Keep optional gameplay telemetry disabled. You can change this choice from the main menu.", menu.DeclineButton, () => SetTelemetryConsent(false))
+            };
+            if (showDevelopmentServerButton)
+                actions.Add(new AccessibleUiAction("Development server URL", "Set the API URL for a backend on your local network. Only available in Development builds.",
+                    menu.DevelopmentServerButton, OpenDevelopmentServerSettings));
+            accessibleUi?.ShowScreen("Bumper Tanks main menu", actions.ToArray());
+        }
+
+        private bool IsDevelopmentBuild => Application.isEditor || Debug.isDebugBuild;
+
+        private void OpenDevelopmentServerSettings()
+        {
+            if (!IsDevelopmentBuild) return;
+            showDevelopmentServerSettings = true;
+            var service = GameServiceClient.Instance;
+            if (string.IsNullOrWhiteSpace(developmentApiDraft) && service != null && service.ApiBaseUrl != "http://127.0.0.1:5188")
+                developmentApiDraft = service.ApiBaseUrl;
+            developmentServerStatus = service == null ? "Service client is unavailable." :
+                service.IdentityReady ? "Online identity is ready for this API." :
+                !string.IsNullOrEmpty(service.IdentityError) ? "Identity setup failed: " + service.IdentityError :
+                "Enter a reachable API URL, then save to retry identity setup.";
+            ShowDevelopmentServerAccessibility();
+        }
+
+        private void DrawDevelopmentServerSettings(Rect safe)
+        {
+            var frames = GuiSafeAreaLayout.DevelopmentServerSettings(safe);
+            GUI.Box(frames.Panel, "Development server");
+            GUI.Label(frames.HelpText, "Use the PC's LAN API URL on the same Wi-Fi, e.g. http://192.168.1.20:5188");
+            developmentApiDraft = GUI.TextField(frames.ApiUrlField, developmentApiDraft ?? string.Empty, 256);
+            GUI.Label(frames.StatusText, developmentServerStatus);
+            if (GUI.Button(frames.SaveButton, "Save & Retry")) SaveDevelopmentServerSettings();
+            if (GUI.Button(frames.CloseButton, "Done"))
+            {
+                showDevelopmentServerSettings = false;
+                ShowMainMenuAccessibility();
+            }
+        }
+
+        private void SaveDevelopmentServerSettings()
+        {
+            var service = GameServiceClient.Instance;
+            if (service == null)
+            {
+                developmentServerStatus = "Service client is unavailable.";
+                return;
+            }
+            if (!service.ConfigureDevelopmentApiBaseUrl(developmentApiDraft, out var error))
+            {
+                developmentServerStatus = error;
+                ShowDevelopmentServerAccessibility();
+                return;
+            }
+
+            realtimeEndpoint = service.RealtimeEndpoint;
+            endpointOverrideError = null;
+            developmentApiDraft = service.ApiBaseUrl;
+            developmentServerStatus = "Saved. Creating online identity…";
+            ShowDevelopmentServerAccessibility();
+        }
+
+        private void UpdateDevelopmentServerStatus()
+        {
+            if (!showDevelopmentServerSettings) return;
+            var service = GameServiceClient.Instance;
+            if (service == null) return;
+            if (service.IdentityReady) developmentServerStatus = "Online identity is ready for this API.";
+            else if (!string.IsNullOrEmpty(service.IdentityError)) developmentServerStatus = "Identity setup failed: " + service.IdentityError;
+        }
+
+        private void ShowDevelopmentServerAccessibility()
+        {
+            var frames = GuiSafeAreaLayout.DevelopmentServerSettings(GuiSafeAreaLayout.Current);
+            accessibleUi?.ShowScreen("Development server URL", new AccessibleUiAction[]
+            {
+                new("API base URL", "Type the PC's API URL, for example http://192.168.1.20:5188. The realtime WebSocket URL is derived automatically.", frames.ApiUrlField, null, false),
+                new("Save and retry identity", developmentServerStatus, frames.SaveButton, SaveDevelopmentServerSettings),
+                new("Done", "Close server settings and return to the main menu.", frames.CloseButton, () =>
+                {
+                    showDevelopmentServerSettings = false;
+                    ShowMainMenuAccessibility();
+                })
             });
         }
 
