@@ -725,20 +725,43 @@ def main():
         rejection = wait_for(invalid, lambda message: message.get("type") == "error", timeout=2, allow_error=True)
         assert rejection["code"] == "invalid_input", rejection
 
+        dash_setup = None
+        while True:
+            try:
+                queued = first.messages.get_nowait()
+            except queue.Empty:
+                break
+            if queued.get("type") == "snapshot" and any(
+                    player["playerId"] == first_join["playerId"] for player in queued.get("players", [])):
+                dash_setup = queued
+        if dash_setup is None:
+            dash_setup = wait_for(first, lambda message: message.get("type") == "snapshot" and
+                                  any(player["playerId"] == first_join["playerId"]
+                                      for player in message.get("players", [])))
+        dash_player = next(player for player in dash_setup["players"]
+                           if player["playerId"] == first_join["playerId"])
+        inward_x, inward_y = -dash_player["position"]["x"], -dash_player["position"]["y"]
+        inward_length = max(0.0001, math.hypot(inward_x, inward_y))
+        aim_x, aim_y = inward_x / inward_length, inward_y / inward_length
         dash_tick = last_client_tick + 1
         first.send({
             "type": "input", "tick": dash_tick,
-            "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
+            "movement": {"x": 0, "y": 0}, "aim": {"x": aim_x, "y": aim_y},
             "fire": False, "ability": True,
         })
         dash_snapshot = wait_for(first, lambda message: message.get("type") == "snapshot" and
-                                 next((player["velocity"]["y"] for player in message["players"]
+                                 next((player["velocity"]["x"] * aim_x + player["velocity"]["y"] * aim_y
+                                       for player in message["players"]
                                        if player["playerId"] == first_join["playerId"]), 0) > 5)
-        assert next(player for player in dash_snapshot["players"] if player["playerId"] == first_join["playerId"])["velocity"]["y"] > 5, dash_snapshot
+        dash_state = next(player for player in dash_snapshot["players"]
+                          if player["playerId"] == first_join["playerId"])
+        dash_speed = math.hypot(dash_state["velocity"]["x"], dash_state["velocity"]["y"])
+        dash_alignment = dash_state["velocity"]["x"] * aim_x + dash_state["velocity"]["y"] * aim_y
+        assert dash_speed > 5 and dash_alignment > 5, (aim_x, aim_y, dash_state, dash_snapshot)
         time.sleep(0.02)
         first.send({
             "type": "input", "tick": dash_tick + 1,
-            "movement": {"x": 0, "y": 0}, "aim": {"x": 0, "y": 1},
+            "movement": {"x": 0, "y": 0}, "aim": {"x": aim_x, "y": aim_y},
             "fire": False, "ability": False,
         })
 
