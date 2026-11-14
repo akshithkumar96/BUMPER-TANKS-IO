@@ -12,6 +12,7 @@ namespace BumperTanks.Tests
     public sealed class RuntimePlayModeTests
     {
         private GameObject tankObject;
+        private GameObject opponentObject;
         private GameObject directorObject;
 
         [SetUp]
@@ -26,6 +27,7 @@ namespace BumperTanks.Tests
         {
             Time.timeScale = 1f;
             if (tankObject != null) Object.Destroy(tankObject);
+            if (opponentObject != null) Object.Destroy(opponentObject);
             if (directorObject != null) Object.Destroy(directorObject);
             yield return null;
             GameplayTuning.Reset();
@@ -89,10 +91,43 @@ namespace BumperTanks.Tests
             Assert.That(director.Phase, Is.EqualTo(MatchPhase.Complete));
         }
 
+        [UnityTest]
+        public IEnumerator OfflineCollapseDamagesOutOfBoundsTanksWithoutTeleportingAndOnlineStateStaysAuthoritative()
+        {
+            directorObject = new GameObject("Boundary damage match director");
+            var director = directorObject.AddComponent<MatchDirector>();
+            tankObject = CreateStationaryTank("Out of bounds tank", new Vector2(6.8f, 0f));
+            opponentObject = CreateStationaryTank("Arena opponent", Vector2.zero);
+            var tank = tankObject.GetComponent<TankController2D>();
+            SetPrivateField(director, "filledBots", true);
+            SetPrivateField(director, "startedAt", Time.time - 35f);
+
+            yield return null;
+            Assert.That(tank.Health, Is.LessThan(100f));
+            Assert.That(tankObject.transform.position.x, Is.EqualTo(6.8f).Within(0.001f));
+            var offlineHealth = tank.Health;
+
+            director.ApplyRealtimeState(35f, new Vector2(8f, 8f));
+            yield return null;
+            Assert.That(tank.Health, Is.EqualTo(offlineHealth));
+            Assert.That(tankObject.transform.position.x, Is.EqualTo(6.8f).Within(0.001f));
+        }
+
         private static void SetPrivateField<T>(object target, string name, T value) =>
-            typeof(TankController2D).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).SetValue(target, value);
+            target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).SetValue(target, value);
 
         private static T GetPrivateField<T>(object target, string name) =>
-            (T)typeof(TankController2D).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(target);
+            (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(target);
+
+        private static GameObject CreateStationaryTank(string name, Vector2 position)
+        {
+            var tank = new GameObject(name);
+            tank.transform.position = position;
+            var body = tank.AddComponent<Rigidbody2D>();
+            body.gravityScale = 0f;
+            tank.AddComponent<CircleCollider2D>();
+            tank.AddComponent<TankController2D>().Configure(TankArchetype.SpeedyBumper, false);
+            return tank;
+        }
     }
 }

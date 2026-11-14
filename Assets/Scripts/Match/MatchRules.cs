@@ -35,6 +35,12 @@ namespace BumperTanks.Match
 
         public static float KnockbackMultiplier(float elapsedSeconds) => PhaseAt(elapsedSeconds) == MatchPhase.FinalZone ? 1.5f : 1f;
         public static int GemMultiplier(float elapsedSeconds) => PhaseAt(elapsedSeconds) == MatchPhase.FinalZone ? 2 : 1;
+        public static float BoundaryDamagePerSecond(float elapsedSeconds) => PhaseAt(elapsedSeconds) switch
+        {
+            MatchPhase.Collapse => 0.75f,
+            MatchPhase.FinalZone => 1.5f,
+            _ => 0f
+        };
 
         public static int CompareStanding(bool firstAlive, int firstGems, int firstEliminations, float firstHealth,
             bool secondAlive, int secondGems, int secondEliminations, float secondHealth)

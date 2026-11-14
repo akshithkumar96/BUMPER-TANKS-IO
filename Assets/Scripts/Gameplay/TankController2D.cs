@@ -322,6 +322,13 @@ namespace BumperTanks.Gameplay
             body.AddForce(direction.normalized * impulse * GameplayTuning.KnockbackMultiplier, ForceMode2D.Impulse);
         }
 
+        public void ApplyBoundaryDamage(float damage)
+        {
+            if (damage <= 0f || health <= 0f) return;
+            health = Mathf.Max(0f, health - damage);
+            if (health <= 0f) gameObject.SetActive(false);
+        }
+
         private void OnCollisionEnter2D(Collision2D collision)
         {
             var other = collision.collider.GetComponent<TankController2D>();

@@ -117,11 +117,16 @@ namespace BumperTanks.Gameplay
         private void ApplyArenaSize()
         {
             if (!networkAuthoritative) Bounds = MatchRules.BoundsAt(Elapsed);
-            foreach (var tank in FindObjectsByType<TankController2D>(FindObjectsSortMode.None))
+            if (!networkAuthoritative)
             {
-                var point = tank.transform.position;
-                var clamped = Bounds.Clamp(point);
-                if ((Vector2)point != clamped) tank.transform.position = clamped;
+                var damage = MatchRules.BoundaryDamagePerSecond(Elapsed) * Time.deltaTime;
+                if (damage > 0f)
+                {
+                    foreach (var tank in FindObjectsByType<TankController2D>(FindObjectsSortMode.None))
+                    {
+                        if (!Bounds.Contains(tank.transform.position)) tank.ApplyBoundaryDamage(damage);
+                    }
+                }
             }
             foreach (var gem in FindObjectsByType<GemPickup>(FindObjectsSortMode.None))
                 if (!Bounds.Contains(gem.transform.position)) Destroy(gem.gameObject);

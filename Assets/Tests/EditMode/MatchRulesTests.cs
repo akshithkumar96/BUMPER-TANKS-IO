@@ -31,6 +31,15 @@ namespace BumperTanks.Tests
             Assert.That(MatchRules.KnockbackMultiplier(60f), Is.EqualTo(1.5f));
         }
 
+        [TestCase(29.99f, 0f)]
+        [TestCase(30f, 0.75f)]
+        [TestCase(59.99f, 0.75f)]
+        [TestCase(60f, 1.5f)]
+        public void BoundaryHazardDamageMatchesServerMatchPhase(float elapsed, float expectedDamagePerSecond)
+        {
+            Assert.That(MatchRules.BoundaryDamagePerSecond(elapsed), Is.EqualTo(expectedDamagePerSecond));
+        }
+
         [Test]
         public void StandingPrefersAliveThenGemsEliminationsAndHealth()
         {
