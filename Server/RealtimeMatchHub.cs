@@ -347,6 +347,7 @@ public sealed class RealtimeMatchHub : IDisposable
         private readonly IProfileRepository profiles;
         private readonly GameplayTuningSettings gameplayTuning;
         private readonly Action<string> retireFinishedRoom;
+        private readonly Random pickupRandom;
         private readonly List<RealtimeShotSegment> shotSegments = new();
         private readonly List<RealtimeGemPickup> gems = new();
         private readonly List<RealtimePowerUpPickup> powerUps = new();
@@ -372,6 +373,7 @@ public sealed class RealtimeMatchHub : IDisposable
             this.gameplayTuning = gameplayTuning;
             this.retireFinishedRoom = retireFinishedRoom;
             var seed = StableSeed(roomId);
+            pickupRandom = new Random(unchecked((int)seed));
             var jitter = new WireVector(((int)(seed % 5) - 2) * 0.1f, ((int)((seed / 5) % 5) - 2) * 0.1f);
             WireVector Place(float x, float y) => new(x + jitter.X, y + jitter.Y);
             var gemPositions = new[]
@@ -384,10 +386,10 @@ public sealed class RealtimeMatchHub : IDisposable
             for (var index = 0; index < gemPositions.Length; index++)
                 gems.Add(new RealtimeGemPickup(index + 1, gemPositions[index]));
 
-            // Deterministic room-seeded drops are kept away from all player spawn slots.
-            powerUps.Add(new RealtimePowerUpPickup(1, "MegaBullet", Place(-2.6f, -1.3f)));
-            powerUps.Add(new RealtimePowerUpPickup(2, "Nitro", Place(-0.1f, -1.3f)));
-            powerUps.Add(new RealtimePowerUpPickup(3, "Magnet", Place(2.4f, -1.3f)));
+            var openingBounds = GetArenaBounds(TimeSpan.Zero);
+            powerUps.Add(new RealtimePowerUpPickup(1, "MegaBullet", ChoosePowerUpPosition(openingBounds, null, avoidSpawnSlots: true)));
+            powerUps.Add(new RealtimePowerUpPickup(2, "Nitro", ChoosePowerUpPosition(openingBounds, null, avoidSpawnSlots: true)));
+            powerUps.Add(new RealtimePowerUpPickup(3, "Magnet", ChoosePowerUpPosition(openingBounds, null, avoidSpawnSlots: true)));
         }
 
         private static uint StableSeed(string value)
@@ -458,7 +460,7 @@ public sealed class RealtimeMatchHub : IDisposable
                 }
                 var slot = players.Count;
                 var player = new RealtimePlayer(id, externalId, displayName, archetype, false, connection,
-                    new WireVector((slot % 4 - 1.5f) * 2.5f, slot / 4 == 0 ? -2.5f : 2.5f));
+                    PlayerSpawnPosition(slot));
                 players.Add(id, player);
                 realParticipants[externalId] = player;
                 added = player;
@@ -550,7 +552,7 @@ public sealed class RealtimeMatchHub : IDisposable
                                 var botId = nextBotId--;
                                 var slot = players.Count;
                                 players.Add(botId, new RealtimePlayer(botId, string.Empty, $"Fill Bot {Math.Abs(botId)}", ArchetypeForBot(botId), true, null,
-                                    new WireVector((slot % 4 - 1.5f) * 2.5f, slot / 4 == 0 ? -2.5f : 2.5f)));
+                                    PlayerSpawnPosition(slot)));
                             }
                             botsFilled = true;
                         }
@@ -979,11 +981,8 @@ public sealed class RealtimeMatchHub : IDisposable
                 {
                     powerUp.Available = true;
                     powerUp.RespawnCount++;
-                    var desired = PowerUpRespawnPositions[(powerUp.PickupId - 1 + powerUp.RespawnCount) % PowerUpRespawnPositions.Length];
                     var bounds = GetArenaBounds(matchElapsed);
-                    powerUp.Position = new WireVector(
-                        Math.Clamp(desired.X, -bounds.HalfWidth, bounds.HalfWidth),
-                        Math.Clamp(desired.Y, -bounds.HalfHeight, bounds.HalfHeight));
+                    powerUp.Position = ChoosePowerUpPosition(bounds, powerUp);
                 }
             }
 
@@ -1132,6 +1131,54 @@ public sealed class RealtimeMatchHub : IDisposable
                 initialHalfHeight + (finalHalfSize - initialHalfHeight) * progress);
         }
 
+        private WireVector ChoosePowerUpPosition(ArenaBounds bounds, RealtimePowerUpPickup? replacing,
+            bool avoidSpawnSlots = false)
+        {
+            const float edgeInset = 0.8f;
+            const float desiredClearance = 1.8f;
+            var minX = MathF.Max(0f, bounds.HalfWidth - edgeInset);
+            var minY = MathF.Max(0f, bounds.HalfHeight - edgeInset);
+            WireVector best = default;
+            var bestClearance = float.NegativeInfinity;
+
+            for (var attempt = 0; attempt < 96; attempt++)
+            {
+                var candidate = new WireVector(
+                    (float)(pickupRandom.NextDouble() * 2d - 1d) * minX,
+                    (float)(pickupRandom.NextDouble() * 2d - 1d) * minY);
+                var clearance = float.PositiveInfinity;
+
+                if (avoidSpawnSlots)
+                {
+                    for (var slot = 0; slot < MaxPlayersPerRoom; slot++)
+                        clearance = MathF.Min(clearance, MathF.Sqrt((candidate - PlayerSpawnPosition(slot)).LengthSquared));
+                }
+                else
+                {
+                    foreach (var player in players.Values)
+                        if (player.Alive) clearance = MathF.Min(clearance, MathF.Sqrt((candidate - player.Position).LengthSquared));
+                }
+
+                foreach (var powerUp in powerUps)
+                    if (powerUp != replacing && powerUp.Available)
+                        clearance = MathF.Min(clearance, MathF.Sqrt((candidate - powerUp.Position).LengthSquared));
+
+                if (clearance > bestClearance)
+                {
+                    best = candidate;
+                    bestClearance = clearance;
+                }
+                if (clearance >= desiredClearance) return candidate;
+            }
+
+            // In the 3x3 end zone, a fully clear point may not exist. Pick the sampled
+            // in-bounds point with the most room so the pickup still respawns.
+            return best;
+        }
+
+        private static WireVector PlayerSpawnPosition(int slot) =>
+            new((slot % 4 - 1.5f) * 2.5f, slot / 4 == 0 ? -2.5f : 2.5f);
+
         private static float Dot(WireVector left, WireVector right) => left.X * right.X + left.Y * right.Y;
 
         private static string ArchetypeForBot(int botId) => (Math.Abs(botId) % 3) switch
@@ -1146,11 +1193,6 @@ public sealed class RealtimeMatchHub : IDisposable
             "SpeedyBumper" => 0.7f,
             "HeavyDozer" => 1.5f,
             _ => 1f
-        };
-
-        private static readonly WireVector[] PowerUpRespawnPositions =
-        {
-            new(-5f, 1f), new(0f, -4f), new(5f, 1f), new(0f, 4f), new(5f, -3.5f), new(-5f, -3.5f)
         };
 
         private sealed class RealtimeGemPickup

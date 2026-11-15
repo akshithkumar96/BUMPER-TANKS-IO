@@ -429,27 +429,67 @@ def smoke_latency_and_jitter(address):
             client.close()
 
 
-def drive_toward_pickups(clients, player_ids, snapshot, pickup_ids):
-    pickups = {pickup["pickupId"]: pickup["position"] for pickup in snapshot["powerUps"]}
-    vectors = []
-    for player_id_value, pickup_id in zip(player_ids, pickup_ids):
-        player = next(player for player in snapshot["players"] if player["playerId"] == player_id_value)
-        target = pickups[pickup_id]
-        dx = target["x"] - player["position"]["x"]
-        dy = target["y"] - player["position"]["y"]
-        length = math.hypot(dx, dy)
-        vectors.append((dx / length, dy / length))
-
-    # Keep input cadence below the server's 60 Hz per-player limit while giving
-    # each tank enough movement frames to cross its seeded pickup location.
-    for tick in range(1, 19):
-        for client, (x, y) in zip(clients, vectors):
-            client.send({"type": "input", "tick": tick, "movement": {"x": x, "y": y},
+def drive_toward_pickups(clients, player_ids, snapshot):
+    target_types = ("MegaBullet", "Nitro", "Magnet")
+    active_fields = ("megaBulletActive", "nitroActive", "magnetActive")
+    ticks = [0] * len(clients)
+    current = snapshot
+    for _ in range(120):
+        current = wait_for(clients[0], lambda message: message.get("type") == "snapshot" and
+                           message.get("tick", 0) > current.get("tick", 0), timeout=2)
+        available = {pickup["type"]: pickup for pickup in current["powerUps"]}
+        players = {player["playerId"]: player for player in current["players"]}
+        active_owners = {field: next((player for player in current["players"] if player.get(field)), None)
+                         for field in active_fields}
+        for index, (client, player_id_value, target_type, active_field) in enumerate(
+                zip(clients, player_ids, target_types, active_fields)):
+            player = players[player_id_value]
+            if active_owners[active_field] is not None:
+                target_position = None
+                magnet_owner = active_owners["magnetActive"]
+                if (magnet_owner is not None and magnet_owner["playerId"] == player_id_value and
+                        player.get("gems", 0) < 1 and current.get("gems")):
+                    target_position = min(current["gems"], key=lambda gem: math.dist(
+                        (gem["position"]["x"], gem["position"]["y"]),
+                        (player["position"]["x"], player["position"]["y"])))['position']
+                if target_position is None:
+                    movement = {"x": 0, "y": 0}
+                else:
+                    dx = target_position["x"] - player["position"]["x"]
+                    dy = target_position["y"] - player["position"]["y"]
+                    length = max(0.0001, math.hypot(dx, dy))
+                    movement = {"x": dx / length, "y": dy / length}
+            else:
+                target = available.get(target_type)
+                if target is None:
+                    movement = {"x": 0, "y": 0}
+                else:
+                    dx = target["position"]["x"] - player["position"]["x"]
+                    dy = target["position"]["y"] - player["position"]["y"]
+                    length = max(0.0001, math.hypot(dx, dy))
+                    movement = {"x": dx / length, "y": dy / length}
+            ticks[index] += 1
+            client.send({"type": "input", "tick": ticks[index], "movement": movement,
                          "aim": {"x": 0, "y": 1}, "fire": False, "ability": False})
-        time.sleep(0.05)
-    for client in clients:
-        client.send({"type": "input", "tick": 19, "movement": {"x": 0, "y": 0},
-                     "aim": {"x": 0, "y": 1}, "fire": False, "ability": False})
+        if (all(players[player_id_value].get(field) for player_id_value, field in zip(player_ids, active_fields)) and
+                players[player_ids[2]].get("gems", 0) >= 1):
+            return current, ticks[0]
+    raise AssertionError(f"Could not collect randomized power-ups and magnetized gem: {current}")
+
+
+def assert_randomized_powerups(snapshot):
+    power_ups = snapshot["powerUps"]
+    bounds = snapshot["arenaBounds"]
+    assert len(power_ups) == 3, snapshot
+    positions = [pickup["position"] for pickup in power_ups]
+    for position in positions:
+        assert abs(position["x"]) <= bounds["halfWidth"] and abs(position["y"]) <= bounds["halfHeight"], (position, bounds)
+    for index, position in enumerate(positions):
+        for other in positions[index + 1:]:
+            assert math.dist((position["x"], position["y"]), (other["x"], other["y"])) >= 1.8, positions
+    spawn_positions = [((slot % 4 - 1.5) * 2.5, -2.5 if slot // 4 == 0 else 2.5) for slot in range(8)]
+    for position in positions:
+        assert min(math.dist((position["x"], position["y"]), spawn) for spawn in spawn_positions) >= 1.8, position
 
 
 def clear_shot_target(snapshot, shooter_id):
@@ -782,16 +822,9 @@ def main():
 
         initial = wait_for(first, lambda message: message.get("type") == "snapshot" and
                            len(message.get("powerUps", [])) == 3, timeout=3)
-        drive_toward_pickups([first, second, clients[2]], first_room_player_ids[:3], initial, [1, 2, 3])
-        moved = wait_for(first, lambda message: message.get("type") == "snapshot" and
-                         any(player["playerId"] == first_room_player_ids[0] and player.get("megaBulletActive")
-                             for player in message["players"]) and
-                         any(player["playerId"] == first_room_player_ids[1] and player.get("nitroActive")
-                             for player in message["players"]) and
-                         any(player["playerId"] == first_room_player_ids[2] and player.get("magnetActive")
-                             for player in message["players"]) and
-                         any(player["playerId"] == first_room_player_ids[2] and player.get("gems", 0) >= 1
-                             for player in message["players"]))
+        assert_randomized_powerups(initial)
+        moved, first_last_input_tick = drive_toward_pickups(
+            [first, second, clients[2]], first_room_player_ids[:3], initial)
         first_room_players = [player for player in moved["players"] if player["playerId"] > 0]
         assert len(first_room_players) == 8, moved
         assert moved["phase"] == "opening" and 0 <= moved["remainingSeconds"] <= 90, moved
@@ -801,17 +834,17 @@ def main():
         first_state = next(player for player in first_room_players if player["playerId"] == first_join["playerId"])
         second_state = next(player for player in first_room_players if player["playerId"] == second_join["playerId"])
         magnet_state = next(player for player in first_room_players if player["playerId"] == first_room_player_ids[2])
-        assert first_state["archetype"] == "SpeedyBumper" and first_state["gems"] == 1 and first_state["megaBulletActive"], moved
+        assert first_state["archetype"] == "SpeedyBumper" and first_state["gems"] >= 1 and first_state["megaBulletActive"], moved
         assert second_state["nitroActive"], moved
         assert magnet_state["magnetActive"] and magnet_state["gems"] >= 1, moved
-        assert all(gem["pickupId"] not in (1, 2) for gem in moved["gems"]), moved
+        assert len(moved["gems"]) < 12, moved
         assert not moved["powerUps"], moved
 
         # Verify a live shot before running the separate 2.5-second bot-fill scenario.
         combat_shooter_id = first_room_player_ids[0]
         target_id = clear_shot_target(moved, combat_shooter_id)["playerId"]
         hit, target_state, previous_health, shooter_last_client_tick = fire_until_hit(
-            first, moved, combat_shooter_id, target_id, 19, retarget=True)
+            first, moved, combat_shooter_id, target_id, first_last_input_tick, retarget=True)
         impulse_speed = math.hypot(target_state["velocity"]["x"], target_state["velocity"]["y"])
         assert target_state["health"] < previous_health and impulse_speed > 0.5, target_state
         last_client_tick = shooter_last_client_tick
@@ -830,6 +863,11 @@ def main():
                                    len(message.get("players", [])) == 8, timeout=4)
         assert len([player for player in two_player_fill["players"] if player["playerId"] > 0]) == 2, two_player_fill
         assert len([player for player in two_player_fill["players"] if player["playerId"] < 0]) == 6, two_player_fill
+        assert_randomized_powerups(two_player_fill)
+        first_drop_positions = [pickup["position"] for pickup in initial["powerUps"]]
+        second_drop_positions = [pickup["position"] for pickup in two_player_fill["powerUps"]]
+        assert any(math.dist((first["x"], first["y"]), (second["x"], second["y"])) > 0.25
+                   for first, second in zip(first_drop_positions, second_drop_positions)), (first_drop_positions, second_drop_positions)
 
         invalid, _ = join(address, 11)
         clients.append(invalid)
@@ -923,7 +961,8 @@ def main():
                                  message.get("elapsedSeconds", 0) >= respawn_elapsed, timeout=4)
         respawned_mega = next(power_up for power_up in after_respawn["powerUps"] if power_up["pickupId"] == 1)
         assert respawned_mega["type"] == "MegaBullet", respawned_mega
-        assert respawned_mega["position"] == {"x": 0, "y": -4}, respawned_mega
+        assert abs(respawned_mega["position"]["x"]) <= after_respawn["arenaBounds"]["halfWidth"], respawned_mega
+        assert abs(respawned_mega["position"]["y"]) <= after_respawn["arenaBounds"]["halfHeight"], respawned_mega
         assert {power_up["pickupId"] for power_up in after_respawn["powerUps"]} == {1, 2, 3}, after_respawn
 
         collapse = wait_for(first, lambda message: message.get("type") == "snapshot" and

@@ -114,9 +114,9 @@ namespace BumperTanks.Gameplay
             heavy.gameObject.AddComponent<BotDriver>();
             var spinner = CreateTank("Ricochet Spinner Bot", new Vector2(4f, 3f), TankArchetype.RicochetSpinner, false, new Color(0.9f, 0.25f, 0.8f));
             spinner.gameObject.AddComponent<BotDriver>();
-            CreatePowerUp(new Vector2(-2.5f, 0f), PowerUpType.Nitro, new Color(1f, 0.9f, 0.1f));
-            CreatePowerUp(new Vector2(0f, 2f), PowerUpType.MegaBullet, new Color(1f, 0.25f, 0.25f));
-            CreatePowerUp(new Vector2(2.5f, 0f), PowerUpType.Magnet, new Color(0.3f, 1f, 0.45f));
+            CreatePowerUp(match.ChoosePowerUpPosition(), PowerUpType.Nitro, new Color(1f, 0.9f, 0.1f));
+            CreatePowerUp(match.ChoosePowerUpPosition(), PowerUpType.MegaBullet, new Color(1f, 0.25f, 0.25f));
+            CreatePowerUp(match.ChoosePowerUpPosition(), PowerUpType.Magnet, new Color(0.3f, 1f, 0.45f));
             for (var i = 0; i < 12; i++)
             {
                 var gem = new GameObject("Gem");

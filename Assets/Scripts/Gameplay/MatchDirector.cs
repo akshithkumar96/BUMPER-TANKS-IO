@@ -13,6 +13,7 @@ namespace BumperTanks.Gameplay
         private readonly BotFillService botFill = new();
         private readonly PowerUpRespawnService powerUpRespawns = new();
         private readonly ScoreService scores = new();
+        private PowerUpSpawnPlanner powerUpSpawnPlanner;
         private bool filledBots;
         private bool resultSubmitted;
         private bool networkAuthoritative;
@@ -33,6 +34,7 @@ namespace BumperTanks.Gameplay
             Instance = this;
             startedAt = Time.time;
             MatchId = System.Guid.NewGuid().ToString("N");
+            powerUpSpawnPlanner = new PowerUpSpawnPlanner(System.BitConverter.ToInt32(System.Guid.ParseExact(MatchId, "N").ToByteArray(), 0));
             Bounds = MatchRules.BoundsAt(0f);
         }
 
@@ -101,10 +103,19 @@ namespace BumperTanks.Gameplay
         {
             while (powerUpRespawns.TryTakeDue(Elapsed, out var type))
             {
-                var half = Bounds.Size * 0.5f;
-                var position = new Vector2(Random.Range(-half.x, half.x), Random.Range(-half.y, half.y));
-                ArenaBootstrap.CreatePowerUp(position, type, PowerUpColor(type));
+                ArenaBootstrap.CreatePowerUp(ChoosePowerUpPosition(), type, PowerUpColor(type));
             }
+        }
+
+        public Vector2 ChoosePowerUpPosition()
+        {
+            var tanks = FindObjectsByType<TankController2D>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            var avoid = new Vector2[tanks.Length];
+            for (var index = 0; index < tanks.Length; index++) avoid[index] = tanks[index].transform.position;
+            var pickups = FindObjectsByType<PowerUpPickup>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            var occupied = new Vector2[pickups.Length];
+            for (var index = 0; index < pickups.Length; index++) occupied[index] = pickups[index].transform.position;
+            return powerUpSpawnPlanner.Choose(Bounds, avoid, occupied);
         }
 
         private static Color PowerUpColor(PowerUpType type) => type switch
