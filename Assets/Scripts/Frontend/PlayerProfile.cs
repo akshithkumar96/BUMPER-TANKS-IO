@@ -1,4 +1,5 @@
 using System;
+using BumperTanks.Core;
 using UnityEngine;
 
 namespace BumperTanks.Frontend
@@ -13,6 +14,7 @@ namespace BumperTanks.Frontend
         public string BumpSoundId = "impact";
         public string[] OwnedCosmetics = Array.Empty<string>();
         public int DailySpinDay = -1;
+        public TankArchetype SelectedArchetype = TankArchetype.SpeedyBumper;
     }
 
     public static class ProfileStore
@@ -54,7 +56,17 @@ namespace BumperTanks.Frontend
             var stored = PlayerPrefs.GetString(ProfileKey, string.Empty);
             var profile = string.IsNullOrWhiteSpace(stored) ? new PlayerProfile() : JsonUtility.FromJson<PlayerProfile>(stored) ?? new PlayerProfile();
             profile.OwnedCosmetics ??= Array.Empty<string>();
+            if (!Enum.IsDefined(typeof(TankArchetype), profile.SelectedArchetype))
+                profile.SelectedArchetype = TankArchetype.SpeedyBumper;
             return profile;
+        }
+
+        public static void SetSelectedArchetype(TankArchetype archetype)
+        {
+            if (!Enum.IsDefined(typeof(TankArchetype), archetype)) archetype = TankArchetype.SpeedyBumper;
+            var profile = Load();
+            profile.SelectedArchetype = archetype;
+            Save(profile);
         }
 
         public static void Save(PlayerProfile profile)

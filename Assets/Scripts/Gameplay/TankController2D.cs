@@ -60,6 +60,8 @@ namespace BumperTanks.Gameplay
             playerControlled = isPlayer;
             tuning = TankTuning.For(archetype);
             if (body != null) body.mass = tuning.Mass(baseMass);
+            weapon = new TankWeapon(projectileCooldown * tuning.ProjectileCooldownMultiplier * GameplayTuning.ProjectileCooldownMultiplier,
+                projectileImpulse * tuning.ShotKnockbackMultiplier * GameplayTuning.KnockbackMultiplier);
         }
 
         private void Awake()

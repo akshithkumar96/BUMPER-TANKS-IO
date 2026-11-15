@@ -1,4 +1,5 @@
 using BumperTanks.Frontend;
+using BumperTanks.Core;
 using BumperTanks.Gameplay;
 using NUnit.Framework;
 
@@ -27,6 +28,30 @@ namespace BumperTanks.Tests
             var restored = UnityEngine.JsonUtility.FromJson<PlayerProfile>(UnityEngine.JsonUtility.ToJson(profile));
 
             Assert.That(restored.TrailId, Is.EqualTo("neon"));
+        }
+
+        [Test]
+        public void SelectedTankArchetypeSurvivesProfileStorageAndInvalidValuesDefaultToSpeedy()
+        {
+            var original = ProfileStore.Load();
+            try
+            {
+                foreach (var archetype in new[] { TankArchetype.SpeedyBumper, TankArchetype.HeavyDozer, TankArchetype.RicochetSpinner })
+                {
+                    ProfileStore.SetSelectedArchetype(archetype);
+                    Assert.That(ProfileStore.Load().SelectedArchetype, Is.EqualTo(archetype));
+                }
+
+                var invalid = ProfileStore.Load();
+                invalid.SelectedArchetype = (TankArchetype)99;
+                ProfileStore.Save(invalid);
+
+                Assert.That(ProfileStore.Load().SelectedArchetype, Is.EqualTo(TankArchetype.SpeedyBumper));
+            }
+            finally
+            {
+                ProfileStore.Save(original);
+            }
         }
 
         [Test]

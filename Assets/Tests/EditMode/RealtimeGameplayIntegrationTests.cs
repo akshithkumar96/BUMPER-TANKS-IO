@@ -67,5 +67,16 @@ namespace BumperTanks.Tests
             Assert.That(paused.Fire, Is.False);
             Assert.That(paused.Ability, Is.False);
         }
+
+        [Test]
+        public void ChangingTheMenuArchetypeAppliesHeavyMassAndWeaponTuning()
+        {
+            tank.Configure(TankArchetype.HeavyDozer, true);
+            var body = tankObject.GetComponent<Rigidbody2D>();
+
+            Assert.That(body.mass, Is.EqualTo(1.5f));
+            Assert.That(tank.Fire(), Is.True);
+            Assert.That(body.linearVelocity.magnitude, Is.GreaterThan(6f));
+        }
     }
 }

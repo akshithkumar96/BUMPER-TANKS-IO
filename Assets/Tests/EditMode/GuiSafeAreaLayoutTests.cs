@@ -86,6 +86,29 @@ namespace BumperTanks.Tests
         [TestCase(390f, 844f)]
         [TestCase(320f, 568f)]
         [TestCase(1280f, 720f)]
+        public void TankChoiceButtonsFitMenuAndRemainAccessibleTouchTargets(float width, float height)
+        {
+            var safe = GuiSafeAreaLayout.ToGuiRect(new Rect(0f, 0f, width, height), height, 8f);
+            var menu = GuiSafeAreaLayout.FrontMenu(safe);
+
+            AssertInside(menu.PlayButton, menu.Panel);
+            Assert.That(menu.ArchetypeButtons, Has.Length.EqualTo(3));
+            foreach (var button in menu.ArchetypeButtons)
+            {
+                AssertInside(button, menu.Panel);
+                Assert.That(button.height, Is.GreaterThanOrEqualTo(44f));
+            }
+            AssertInside(menu.GarageButton, menu.Panel);
+            AssertInside(menu.LeaderboardButton, menu.Panel);
+            Assert.That(menu.PlayButton.yMax, Is.LessThanOrEqualTo(menu.ArchetypeButtons[0].yMin));
+            Assert.That(menu.ArchetypeButtons[0].yMax, Is.LessThanOrEqualTo(menu.GarageButton.yMin));
+            Assert.That(menu.GarageButton.yMax, Is.LessThanOrEqualTo(menu.TelemetryStatus.yMin));
+            Assert.That(menu.LeaderboardButton.yMax, Is.LessThanOrEqualTo(menu.TelemetryStatus.yMin));
+        }
+
+        [TestCase(390f, 844f)]
+        [TestCase(320f, 568f)]
+        [TestCase(1280f, 720f)]
         public void DevelopmentServerFormFitsSafeAreaAndKeepsTouchTargets(float width, float height)
         {
             var safe = GuiSafeAreaLayout.ToGuiRect(new Rect(0f, 0f, width, height), height, 8f);

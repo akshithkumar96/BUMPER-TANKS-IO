@@ -12,6 +12,12 @@ namespace BumperTanks.Gameplay
     public sealed class ArenaBootstrap : MonoBehaviour
     {
         public const string RealtimeEndpointPlayerPrefsKey = ServiceEndpointSettings.DevelopmentRealtimeOverridePlayerPrefsKey;
+        private static readonly TankArchetype[] PlayerArchetypeChoices =
+        {
+            TankArchetype.SpeedyBumper,
+            TankArchetype.HeavyDozer,
+            TankArchetype.RicochetSpinner
+        };
         private static ArenaBootstrap current;
         private string realtimeEndpoint;
         private string endpointOverrideError;
@@ -88,7 +94,9 @@ namespace BumperTanks.Gameplay
             match = gameObject.AddComponent<MatchDirector>();
             CreateCamera();
             CreateArenaBounds();
-            player = CreateTank("Player Speedy Bumper", new Vector2(0f, -3f), TankArchetype.SpeedyBumper, true, new Color(0.15f, 0.75f, 1f));
+            var selectedArchetype = ProfileStore.Load().SelectedArchetype;
+            player = CreateTank($"Player {ArchetypeName(selectedArchetype)}", new Vector2(0f, -3f), selectedArchetype, true,
+                new Color(0.15f, 0.75f, 1f));
             gameObject.AddComponent<GarageOverlay>();
             gameObject.AddComponent<LeaderboardOverlay>();
             accessibleUi = gameObject.AddComponent<AccessibleUiBridge>();
@@ -149,13 +157,24 @@ namespace BumperTanks.Gameplay
                 var panel = menu.Panel;
                 GUI.Box(panel, "BUMPER TANKS IO");
                 GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 140f, panel.y + 45f, 280f, 25f), safe), "Top down arena brawler");
-                if (GUI.Button(MenuFrame(panel, -115f, -70f, 230f, 40f), "Play Arena"))
+                if (GUI.Button(menu.PlayButton, "Play Arena"))
                     BeginArena();
-                if (GUI.Button(MenuFrame(panel, -115f, -20f, 110f, 34f), "Garage (G)"))
+                var profile = ProfileStore.Load();
+                for (var index = 0; index < PlayerArchetypeChoices.Length; index++)
+                {
+                    var archetype = PlayerArchetypeChoices[index];
+                    var isSelected = profile.SelectedArchetype == archetype;
+                    var previousBackground = GUI.backgroundColor;
+                    GUI.backgroundColor = isSelected ? new Color(0.35f, 0.8f, 1f) : Color.white;
+                    if (GUI.Button(menu.ArchetypeButtons[index], $"{(isSelected ? "✓ " : string.Empty)}{ArchetypeButtonLabel(archetype)}"))
+                        SelectPlayerArchetype(archetype);
+                    GUI.backgroundColor = previousBackground;
+                }
+                if (GUI.Button(menu.GarageButton, "Garage (G)"))
                 {
                     OpenGarageFromMenu();
                 }
-                if (GUI.Button(MenuFrame(panel, 5f, -20f, 110f, 34f), "Scores (L)"))
+                if (GUI.Button(menu.LeaderboardButton, "Scores (L)"))
                 {
                     OpenLeaderboardFromMenu();
                 }
@@ -303,6 +322,18 @@ namespace BumperTanks.Gameplay
             ShowMainMenuAccessibility();
         }
 
+        private void SelectPlayerArchetype(TankArchetype archetype)
+        {
+            ProfileStore.SetSelectedArchetype(archetype);
+            if (player != null)
+            {
+                player.Configure(archetype, true);
+                player.name = $"Player {ArchetypeName(archetype)}";
+            }
+            accessibleUi?.Announce($"{ArchetypeName(archetype)} selected. {ArchetypeAbilityHint(archetype)}");
+            ShowMainMenuAccessibility();
+        }
+
         private void OpenGarageFromMatch()
         {
             Time.timeScale = 0f;
@@ -327,12 +358,11 @@ namespace BumperTanks.Gameplay
         {
             var showDevelopmentServerButton = IsDevelopmentBuild;
             var menu = GuiSafeAreaLayout.FrontMenu(GuiSafeAreaLayout.Current, showDevelopmentServerButton);
-            var panel = menu.Panel;
             var actions = new List<AccessibleUiAction>
             {
-                new("Play Arena", "Start the local arena match. Telemetry choice is optional.", MenuFrame(panel, -115f, -70f, 230f, 40f), BeginArena),
-                new("Garage", "Change tank color or trail and claim the daily reward.", MenuFrame(panel, -115f, -20f, 110f, 34f), OpenGarageFromMenu),
-                new("Leaderboard", "View Battle Coins rankings.", MenuFrame(panel, 5f, -20f, 110f, 34f), OpenLeaderboardFromMenu),
+                new("Play Arena", "Start a match with your selected tank. Telemetry choice is optional.", menu.PlayButton, BeginArena),
+                new("Garage", "Change tank color or trail and claim the daily reward.", menu.GarageButton, OpenGarageFromMenu),
+                new("Leaderboard", "View Battle Coins rankings.", menu.LeaderboardButton, OpenLeaderboardFromMenu),
                 new("Telemetry sharing choice", !TelemetryConsentSettings.HasChoice
                     ? "Optional. Choose whether to share gameplay activity from this profile to improve balance. You can play without choosing."
                     : $"Current choice: {(TelemetryConsentSettings.IsAllowed ? "on" : "off")}. You can change it any time.",
@@ -340,6 +370,17 @@ namespace BumperTanks.Gameplay
                 new("Allow gameplay sharing", "Send gameplay activity linked to this game profile to help improve balance. No name or email is sent.", menu.AllowButton, () => SetTelemetryConsent(true)),
                 new("No thanks", "Keep optional gameplay telemetry disabled. You can change this choice from the main menu.", menu.DeclineButton, () => SetTelemetryConsent(false))
             };
+            var selectedArchetype = ProfileStore.Load().SelectedArchetype;
+            var archetypeActions = new List<AccessibleUiAction>(PlayerArchetypeChoices.Length);
+            for (var index = 0; index < PlayerArchetypeChoices.Length; index++)
+            {
+                var archetype = PlayerArchetypeChoices[index];
+                archetypeActions.Add(new AccessibleUiAction(
+                    $"{ArchetypeName(archetype)}{(selectedArchetype == archetype ? " (selected)" : string.Empty)}",
+                    $"Choose {ArchetypeName(archetype)}. {ArchetypeAbilityHint(archetype)}",
+                    menu.ArchetypeButtons[index], () => SelectPlayerArchetype(archetype)));
+            }
+            actions.InsertRange(0, archetypeActions);
             if (showDevelopmentServerButton)
                 actions.Add(new AccessibleUiAction("Development server URL", "Set the API URL for a backend on your local network. Only available in Development builds.",
                     menu.DevelopmentServerButton, OpenDevelopmentServerSettings));
@@ -862,8 +903,26 @@ namespace BumperTanks.Gameplay
             accessibleUi?.ShowScreen(label, actions.ToArray());
         }
 
-        private static Rect MenuFrame(Rect panel, float offsetX, float offsetY, float width, float height) =>
-            GuiSafeAreaLayout.Clamp(new Rect(panel.center.x + offsetX, panel.center.y + offsetY, width, height), GuiSafeAreaLayout.Current);
+        private static string ArchetypeName(TankArchetype archetype) => archetype switch
+        {
+            TankArchetype.HeavyDozer => "Heavy Dozer",
+            TankArchetype.RicochetSpinner => "Ricochet Spinner",
+            _ => "Speedy Bumper"
+        };
+
+        private static string ArchetypeButtonLabel(TankArchetype archetype) => archetype switch
+        {
+            TankArchetype.HeavyDozer => "Heavy\nShield Wall",
+            TankArchetype.RicochetSpinner => "Spinner\nWhirlwind",
+            _ => "Speedy\nNitro Dash"
+        };
+
+        private static string ArchetypeAbilityHint(TankArchetype archetype) => archetype switch
+        {
+            TankArchetype.HeavyDozer => "Heavy tank with a front shield that absorbs hits and reflects half the impulse for 3 seconds.",
+            TankArchetype.RicochetSpinner => "Medium tank with a Whirlwind that deflects projectiles and knocks nearby foes away.",
+            _ => "Fast, light tank with a Nitro Dash that surges forward with 2.5 times knockback force."
+        };
 
         private static void CreateCamera()
         {

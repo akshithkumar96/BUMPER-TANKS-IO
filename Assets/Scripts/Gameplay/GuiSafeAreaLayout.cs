@@ -33,15 +33,28 @@ namespace BumperTanks.Gameplay
 
         public static FrontMenuFrames FrontMenu(Rect safeArea, bool includeDevelopmentServerButton = false)
         {
-            var compact = safeArea.width <= 500f || safeArea.height <= 500f;
-            var panel = Centered(340f, includeDevelopmentServerButton ? 388f : compact ? 340f : 300f, safeArea);
+            var panel = Centered(340f, includeDevelopmentServerButton ? 500f : 400f, safeArea);
+            const float archetypeButtonGap = 6f;
+            var archetypeButtonWidth = Mathf.Min(100f, (panel.width - 24f - archetypeButtonGap * 2f) / 3f);
+            var archetypeRowWidth = archetypeButtonWidth * 3f + archetypeButtonGap * 2f;
+            var archetypeStartX = panel.center.x - archetypeRowWidth * 0.5f;
+            var archetypeButtons = new[]
+            {
+                Clamp(new Rect(archetypeStartX, panel.center.y - 20f, archetypeButtonWidth, 44f), panel),
+                Clamp(new Rect(archetypeStartX + archetypeButtonWidth + archetypeButtonGap, panel.center.y - 20f, archetypeButtonWidth, 44f), panel),
+                Clamp(new Rect(archetypeStartX + (archetypeButtonWidth + archetypeButtonGap) * 2f, panel.center.y - 20f, archetypeButtonWidth, 44f), panel)
+            };
             return new FrontMenuFrames(panel,
-                Clamp(new Rect(panel.center.x - 145f, panel.center.y + 12f, Mathf.Min(290f, safeArea.width - 32f), 44f), safeArea),
-                Clamp(new Rect(panel.center.x - 115f, panel.center.y + 64f, 110f, 44f), safeArea),
-                Clamp(new Rect(panel.center.x + 5f, panel.center.y + 64f, 110f, 44f), safeArea),
-                Clamp(new Rect(panel.center.x - 140f, panel.center.y + 116f, 280f, 24f), safeArea),
+                Clamp(new Rect(panel.center.x - 115f, panel.center.y - 70f, 230f, 40f), panel),
+                archetypeButtons,
+                Clamp(new Rect(panel.center.x - 115f, panel.center.y + 30f, 110f, 34f), panel),
+                Clamp(new Rect(panel.center.x + 5f, panel.center.y + 30f, 110f, 34f), panel),
+                Clamp(new Rect(panel.center.x - 145f, panel.center.y + 68f, Mathf.Min(290f, panel.width - 16f), 44f), panel),
+                Clamp(new Rect(panel.center.x - 115f, panel.center.y + 120f, 110f, 44f), panel),
+                Clamp(new Rect(panel.center.x + 5f, panel.center.y + 120f, 110f, 44f), panel),
+                Clamp(new Rect(panel.center.x - 140f, panel.center.y + 166f, 280f, 24f), panel),
                 includeDevelopmentServerButton
-                    ? Clamp(new Rect(panel.center.x - 115f, panel.center.y + 148f, 230f, 44f), safeArea)
+                    ? Clamp(new Rect(panel.center.x - 115f, panel.center.y + 202f, 230f, 44f), panel)
                     : default);
         }
 
@@ -64,9 +77,14 @@ namespace BumperTanks.Gameplay
 
     public readonly struct FrontMenuFrames
     {
-        public FrontMenuFrames(Rect panel, Rect telemetryStatus, Rect allowButton, Rect declineButton, Rect currencyLabel, Rect developmentServerButton)
+        public FrontMenuFrames(Rect panel, Rect playButton, Rect[] archetypeButtons, Rect garageButton, Rect leaderboardButton,
+            Rect telemetryStatus, Rect allowButton, Rect declineButton, Rect currencyLabel, Rect developmentServerButton)
         {
             Panel = panel;
+            PlayButton = playButton;
+            ArchetypeButtons = archetypeButtons;
+            GarageButton = garageButton;
+            LeaderboardButton = leaderboardButton;
             TelemetryStatus = telemetryStatus;
             AllowButton = allowButton;
             DeclineButton = declineButton;
@@ -75,6 +93,10 @@ namespace BumperTanks.Gameplay
         }
 
         public Rect Panel { get; }
+        public Rect PlayButton { get; }
+        public Rect[] ArchetypeButtons { get; }
+        public Rect GarageButton { get; }
+        public Rect LeaderboardButton { get; }
         public Rect TelemetryStatus { get; }
         public Rect AllowButton { get; }
         public Rect DeclineButton { get; }
