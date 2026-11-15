@@ -12,6 +12,10 @@ public interface IProfileRepository
     bool TryCompleteAdSpin(string challengeId, string eventId, string playerId, DateTimeOffset callbackAt,
         out PlayerProfile updated, out int award, out bool duplicate);
     AdSpinChallenge? GetAdSpinChallenge(string challengeId, string playerId);
+    MatchBonusChallenge CreateMatchBonusChallenge(string playerId, string matchId);
+    bool TryCompleteMatchBonus(string challengeId, string eventId, string playerId, DateTimeOffset callbackAt,
+        out PlayerProfile updated, out int award, out bool duplicate);
+    MatchBonusChallenge? GetMatchBonusChallenge(string challengeId, string playerId);
     void Save(PlayerProfile profile);
     bool TryClaimDailyReward(string playerId, DateOnly today, out PlayerProfile updated, out int reward);
     bool TryCompleteMatch(string playerId, string matchId, int gems, int eliminations, out PlayerProfile updated, out int award);

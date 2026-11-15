@@ -35,6 +35,11 @@ namespace BumperTanks.Gameplay
         private int onlineEliminations;
         private int onlineGemCount;
         private int onlineMatchAward;
+        private string onlineMatchId = string.Empty;
+        private int onlineMatchBonusAward;
+        private bool onlineMatchBonusPending;
+        private bool onlineMatchBonusClaimed;
+        private string onlineMatchBonusMessage = string.Empty;
         private int appliedPickupTick = -1;
         private int appliedShotTick = -1;
         private float onlineRemainingSeconds;
@@ -206,11 +211,26 @@ namespace BumperTanks.Gameplay
                         ? $"Winner: {OnlineWinnerName()}"
                         : match.Winner != null ? $"Winner: {match.Winner.name}" : "Time up";
                     var receivedOnlineReward = onlineMatch && onlineMatchResultReceived;
-                    var panel = GuiSafeAreaLayout.Centered(290f, receivedOnlineReward ? 170f : 140f, safe);
+                    var canOfferMatchBonus = CanOfferMatchBonus();
+                    var panel = GuiSafeAreaLayout.Centered(290f, canOfferMatchBonus ? 240f : receivedOnlineReward ? 170f : 140f, safe);
                     GUI.Box(panel, label);
                     if (receivedOnlineReward)
-                        GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 130f, panel.center.y - 20f, 260f, 24f), safe), $"Earned {onlineMatchAward} Battle Coins");
-                    if (GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 80f, panel.center.y + (receivedOnlineReward ? 20f : 5f), 160f, 36f), safe), "Play Again"))
+                        GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 130f, panel.center.y + (canOfferMatchBonus ? -82f : -20f), 260f, 24f), safe), $"Earned {onlineMatchAward} Battle Coins");
+                    if (canOfferMatchBonus)
+                    {
+                        var status = onlineMatchBonusMessage;
+                        if (onlineMatchBonusClaimed) status = $"Verified: +{onlineMatchBonusAward} Battle Coins";
+                        else if (onlineMatchBonusPending && string.IsNullOrEmpty(status)) status = "Waiting for signed ad verification…";
+                        if (!string.IsNullOrEmpty(status))
+                            GUI.Label(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 130f, panel.center.y - 52f, 260f, 36f), safe), status);
+                        GUI.enabled = !onlineMatchBonusPending && !onlineMatchBonusClaimed;
+                        if (GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 120f, panel.center.y - 8f, 240f, 44f), safe),
+                                onlineMatchBonusClaimed ? "Reward doubled" : onlineMatchBonusPending ? "Verifying…" : $"Watch ad to double ({onlineMatchAward})"))
+                            RequestMatchBonus();
+                        GUI.enabled = true;
+                    }
+                    var rematchOffset = canOfferMatchBonus ? 68f : receivedOnlineReward ? 20f : 5f;
+                    if (GUI.Button(GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 80f, panel.center.y + rematchOffset, 160f, 36f), safe), "Play Again"))
                     {
                         GameServiceClient.Instance?.Track(localPlayerId, "match_rematch");
                         RestartArena();
@@ -590,10 +610,48 @@ namespace BumperTanks.Gameplay
         {
             if (receipt == null || receipt.profile == null ||
                 !string.Equals(receipt.playerId, ProfileStore.GetServerPlayerId(), StringComparison.Ordinal)) return;
+            if (!string.Equals(onlineMatchId, receipt.matchId, StringComparison.Ordinal))
+            {
+                onlineMatchId = receipt.matchId;
+                onlineMatchBonusAward = 0;
+                onlineMatchBonusPending = false;
+                onlineMatchBonusClaimed = false;
+                onlineMatchBonusMessage = string.Empty;
+            }
             GameServiceClient.Instance?.ApplyServerProfile(receipt.profile.battleCoins, receipt.profile.ownedCosmetics);
             onlineMatchAward = receipt.award;
             onlineMatchResultReceived = true;
             ShowResultAccessibility();
+        }
+
+        private bool CanOfferMatchBonus()
+        {
+            var service = GameServiceClient.Instance;
+            return onlineMatch && onlineMatchResultReceived && onlineMatchAward > 0 &&
+                   service != null && service.CanWatchAdMatchBonus;
+        }
+
+        private void RequestMatchBonus()
+        {
+            if (onlineMatchBonusPending || onlineMatchBonusClaimed || !CanOfferMatchBonus()) return;
+            var service = GameServiceClient.Instance;
+            if (service == null) return;
+            onlineMatchBonusPending = true;
+            onlineMatchBonusMessage = "Preparing verified reward…";
+            ShowResultAccessibility();
+            service.WatchAdMatchBonus(onlineMatchId, onlineMatchAward, award =>
+            {
+                onlineMatchBonusPending = false;
+                onlineMatchBonusClaimed = true;
+                onlineMatchBonusAward = award;
+                onlineMatchBonusMessage = string.Empty;
+                ShowResultAccessibility();
+            }, error =>
+            {
+                onlineMatchBonusPending = false;
+                onlineMatchBonusMessage = error;
+                ShowResultAccessibility();
+            });
         }
 
         private void ReconcilePickupVisuals<T>(Dictionary<int, Transform> visuals, T[] items, Func<T, int> idSelector,
@@ -779,12 +837,24 @@ namespace BumperTanks.Gameplay
                 ? $"Winner: {OnlineWinnerName()}" + (onlineMatchResultReceived ? $". Earned {onlineMatchAward} Battle Coins." : string.Empty)
                 : match != null && match.Winner != null ? $"Winner: {match.Winner.name}" : "Match complete";
             var safe = GuiSafeAreaLayout.Current;
-            var panel = GuiSafeAreaLayout.Centered(290f, 140f, safe);
-            var frame = GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 80f, panel.center.y + 5f, 160f, 36f), safe);
-            accessibleUi?.ShowScreen(label, new AccessibleUiAction[]
+            var canOfferMatchBonus = CanOfferMatchBonus();
+            var panel = GuiSafeAreaLayout.Centered(290f, canOfferMatchBonus ? 240f : 140f, safe);
+            var actions = new List<AccessibleUiAction>();
+            if (canOfferMatchBonus)
             {
-                new("Play Again", "Start a fresh arena match.", frame, RestartArena)
-            });
+                var bonusLabel = onlineMatchBonusClaimed
+                    ? $"Verified bonus: {onlineMatchBonusAward} Battle Coins added"
+                    : onlineMatchBonusPending ? "Match bonus verification pending" : $"Watch a rewarded video to double {onlineMatchAward} Battle Coins";
+                actions.Add(new AccessibleUiAction(bonusLabel,
+                    onlineMatchBonusPending || onlineMatchBonusClaimed ? onlineMatchBonusMessage : "The server confirms the ad before awarding the additional match coins.",
+                    GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 120f, panel.center.y - 8f, 240f, 44f), safe),
+                    onlineMatchBonusPending || onlineMatchBonusClaimed ? null : RequestMatchBonus,
+                    !onlineMatchBonusPending && !onlineMatchBonusClaimed));
+            }
+            var rematchY = panel.center.y + (canOfferMatchBonus ? 68f : 5f);
+            actions.Add(new AccessibleUiAction("Play Again", "Start a fresh arena match.",
+                GuiSafeAreaLayout.Clamp(new Rect(panel.center.x - 80f, rematchY, 160f, 36f), safe), RestartArena));
+            accessibleUi?.ShowScreen(label, actions.ToArray());
         }
 
         private static Rect MenuFrame(Rect panel, float offsetX, float offsetY, float width, float height) =>

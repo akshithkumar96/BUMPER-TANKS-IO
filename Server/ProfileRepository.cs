@@ -5,7 +5,9 @@ public sealed class ProfileRepository : IProfileRepository
 {
     private readonly ConcurrentDictionary<string, PlayerProfile> profiles;
     private readonly HashSet<string> completedMatches = new();
+    private readonly Dictionary<string, int> completedMatchAwards = new(StringComparer.Ordinal);
     private readonly Dictionary<string, AdSpinChallenge> adSpinChallenges = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, MatchBonusChallenge> matchBonusChallenges = new(StringComparer.Ordinal);
     private readonly Dictionary<string, RewardedAdEvent> rewardedAdEvents = new(StringComparer.Ordinal);
     private readonly string path;
     private readonly Lock writeLock = new();
@@ -18,7 +20,9 @@ public sealed class ProfileRepository : IProfileRepository
             var snapshot = JsonSerializer.Deserialize<ProfileSnapshot>(File.ReadAllText(path)) ?? new ProfileSnapshot();
             profiles = new ConcurrentDictionary<string, PlayerProfile>(snapshot.Profiles);
             completedMatches.UnionWith(snapshot.CompletedMatches);
+            foreach (var (key, award) in snapshot.CompletedMatchAwards ?? new()) completedMatchAwards[key] = award;
             foreach (var challenge in snapshot.AdSpinChallenges ?? new()) adSpinChallenges[challenge.ChallengeId] = challenge;
+            foreach (var challenge in snapshot.MatchBonusChallenges ?? new()) matchBonusChallenges[challenge.ChallengeId] = challenge;
             foreach (var (eventId, binding) in snapshot.RewardedAdEvents ?? new()) rewardedAdEvents[eventId] = binding;
         }
         else profiles = new ConcurrentDictionary<string, PlayerProfile>();
@@ -52,7 +56,7 @@ public sealed class ProfileRepository : IProfileRepository
             var challenge = adSpinChallenges.GetValueOrDefault(challengeId);
             var hasCurrentProfile = profiles.TryGetValue(playerId, out var current);
             current ??= new PlayerProfile(playerId, 0, 0, DateOnly.MinValue);
-            if (duplicate && binding == new RewardedAdEvent(playerId, challengeId) && challenge is { Completed: true } && challenge.PlayerId == playerId)
+            if (duplicate && binding == new RewardedAdEvent(playerId, challengeId, "daily_spin") && challenge is { Completed: true } && challenge.PlayerId == playerId)
             {
                 updated = current; award = challenge.Award; return true;
             }
@@ -81,6 +85,96 @@ public sealed class ProfileRepository : IProfileRepository
     public AdSpinChallenge? GetAdSpinChallenge(string challengeId, string playerId)
     {
         lock (writeLock) return adSpinChallenges.TryGetValue(challengeId, out var challenge) && challenge.PlayerId == playerId ? challenge : null;
+    }
+
+    public MatchBonusChallenge CreateMatchBonusChallenge(string playerId, string matchId)
+    {
+        lock (writeLock)
+        {
+            var matchKey = MatchKey(playerId, matchId);
+            if (!completedMatchAwards.TryGetValue(matchKey, out var matchAward) || matchAward <= 0)
+                throw new InvalidOperationException("match reward is not eligible for doubling");
+            var current = GetOrCreate(playerId);
+            if ((long)current.BattleCoins + matchAward > int.MaxValue)
+                throw new InvalidOperationException("battle coin balance cannot accept the bonus");
+
+            var existing = matchBonusChallenges.Values.FirstOrDefault(item => item.PlayerId == playerId && item.MatchId == matchId);
+            if (existing is { Completed: true }) throw new InvalidOperationException("match reward bonus already claimed");
+            var now = DateTimeOffset.UtcNow;
+            if (existing is { ExpiresUtc: var expires } && expires > now) return existing;
+
+            var challenge = existing == null
+                ? NewMatchBonusChallenge(playerId, matchId, matchAward, now)
+                : existing with { CreatedUtc = now, ExpiresUtc = now.AddDays(7) };
+            if (existing == null) matchBonusChallenges[challenge.ChallengeId] = challenge;
+            else matchBonusChallenges[existing.ChallengeId] = challenge;
+            try { PersistLocked(); }
+            catch
+            {
+                if (existing == null) matchBonusChallenges.Remove(challenge.ChallengeId);
+                else matchBonusChallenges[existing.ChallengeId] = existing;
+                throw;
+            }
+            return challenge;
+        }
+    }
+
+    public bool TryCompleteMatchBonus(string challengeId, string eventId, string playerId, DateTimeOffset callbackAt,
+        out PlayerProfile updated, out int award, out bool duplicate)
+    {
+        lock (writeLock)
+        {
+            duplicate = rewardedAdEvents.TryGetValue(eventId, out var binding);
+            var challenge = matchBonusChallenges.GetValueOrDefault(challengeId);
+            var hasCurrentProfile = profiles.TryGetValue(playerId, out var current);
+            current ??= new PlayerProfile(playerId, 0, 0, DateOnly.MinValue);
+            if (duplicate && binding == new RewardedAdEvent(playerId, challengeId, "match_bonus") &&
+                challenge is { Completed: true } && challenge.PlayerId == playerId)
+            {
+                updated = current;
+                award = challenge.Award;
+                return true;
+            }
+            if (duplicate)
+            {
+                updated = current;
+                award = 0;
+                return false;
+            }
+
+            updated = current;
+            award = 0;
+            if (challenge == null || challenge.Completed || challenge.PlayerId != playerId ||
+                challenge.ExpiresUtc < DateTimeOffset.UtcNow || callbackAt < challenge.CreatedUtc.AddMinutes(-1) ||
+                callbackAt > challenge.ExpiresUtc ||
+                !completedMatchAwards.TryGetValue(MatchKey(playerId, challenge.MatchId), out var matchAward) ||
+                matchAward != challenge.Award || (long)current.BattleCoins + challenge.Award > int.MaxValue)
+                return false;
+
+            award = challenge.Award;
+            updated = current with { BattleCoins = current.BattleCoins + award };
+            var previousProfile = hasCurrentProfile ? current : null;
+            var completed = challenge with { Completed = true, EventId = eventId, Timestamp = callbackAt.ToString("yyyyMMddHHmm") };
+            profiles[playerId] = updated;
+            rewardedAdEvents[eventId] = new RewardedAdEvent(playerId, challengeId, "match_bonus");
+            matchBonusChallenges[challengeId] = completed;
+            try { PersistLocked(); }
+            catch
+            {
+                if (previousProfile == null) profiles.TryRemove(playerId, out _); else profiles[playerId] = previousProfile;
+                rewardedAdEvents.Remove(eventId);
+                matchBonusChallenges[challengeId] = challenge;
+                throw;
+            }
+            return true;
+        }
+    }
+
+    public MatchBonusChallenge? GetMatchBonusChallenge(string challengeId, string playerId)
+    {
+        lock (writeLock)
+            return matchBonusChallenges.TryGetValue(challengeId, out var challenge) && challenge.PlayerId == playerId
+                ? challenge : null;
     }
 
     public void Save(PlayerProfile profile)
@@ -122,6 +216,7 @@ public sealed class ProfileRepository : IProfileRepository
                 return false;
             }
             award = (int)Math.Min(200L, (long)gems + (long)eliminations * 10);
+            completedMatchAwards[key] = award;
             updated = current with
             {
                 BattleCoins = (int)Math.Min(int.MaxValue, (long)current.BattleCoins + award),
@@ -177,20 +272,30 @@ public sealed class ProfileRepository : IProfileRepository
         {
             Profiles = profiles.ToDictionary(pair => pair.Key, pair => pair.Value),
             CompletedMatches = completedMatches,
+            CompletedMatchAwards = completedMatchAwards,
             AdSpinChallenges = adSpinChallenges.Values.ToList(),
+            MatchBonusChallenges = matchBonusChallenges.Values.ToList(),
             RewardedAdEvents = rewardedAdEvents
         }));
         File.Move(temporary, path, true);
     }
+
+    private static string MatchKey(string playerId, string matchId) => $"{playerId}:{matchId}";
+
+    private static MatchBonusChallenge NewMatchBonusChallenge(string playerId, string matchId, int award, DateTimeOffset now) =>
+        new("mb" + Guid.NewGuid().ToString("N")[..30], playerId, matchId, now, now.AddDays(7), false, award, string.Empty, string.Empty);
 }
 
 public sealed class ProfileSnapshot
 {
     public Dictionary<string, PlayerProfile> Profiles { get; set; } = new();
     public HashSet<string> CompletedMatches { get; set; } = new();
+    public Dictionary<string, int> CompletedMatchAwards { get; set; } = new(StringComparer.Ordinal);
     public List<AdSpinChallenge>? AdSpinChallenges { get; set; } = new();
+    public List<MatchBonusChallenge>? MatchBonusChallenges { get; set; } = new();
     public Dictionary<string, RewardedAdEvent>? RewardedAdEvents { get; set; } = new(StringComparer.Ordinal);
 }
 
 public sealed record AdSpinChallenge(string ChallengeId, string PlayerId, DateOnly Day, DateTimeOffset CreatedUtc, DateTimeOffset ExpiresUtc, bool Completed, int Award, string EventId, string Timestamp);
-public sealed record RewardedAdEvent(string PlayerId, string ChallengeId);
+public sealed record MatchBonusChallenge(string ChallengeId, string PlayerId, string MatchId, DateTimeOffset CreatedUtc, DateTimeOffset ExpiresUtc, bool Completed, int Award, string EventId, string Timestamp);
+public sealed record RewardedAdEvent(string PlayerId, string ChallengeId, string ChallengeType = "daily_spin");

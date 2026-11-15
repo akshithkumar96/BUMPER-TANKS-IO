@@ -83,3 +83,33 @@ public sealed class TelemetryCrashStorageMigration : Migration
         DROP TABLE IF EXISTS telemetry_events;
         """);
 }
+
+[DbContext(typeof(GameStorageContext))]
+[Migration("20261114000100_MatchRewardedBonus")]
+public sealed class MatchRewardedBonusMigration : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("""
+        ALTER TABLE rewarded_ad_events DROP CONSTRAINT IF EXISTS rewarded_ad_events_challenge_id_fkey;
+        ALTER TABLE rewarded_ad_events ADD COLUMN challenge_type varchar(24) NOT NULL DEFAULT 'daily_spin';
+        CREATE TABLE match_bonus_challenges (
+            challenge_id varchar(32) PRIMARY KEY,
+            player_id varchar(32) NOT NULL REFERENCES profiles(player_id) ON DELETE CASCADE,
+            match_id varchar(32) NOT NULL,
+            created_utc timestamp with time zone NOT NULL,
+            expires_utc timestamp with time zone NOT NULL,
+            completed boolean NOT NULL,
+            award integer NOT NULL,
+            event_id varchar(128) NOT NULL,
+            callback_timestamp varchar(12) NOT NULL,
+            CONSTRAINT uq_match_bonus_challenges_player_match UNIQUE (player_id, match_id)
+        );
+        """);
+
+    protected override void Down(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("""
+        DROP TABLE IF EXISTS match_bonus_challenges;
+        DELETE FROM rewarded_ad_events WHERE challenge_type <> 'daily_spin';
+        ALTER TABLE rewarded_ad_events DROP COLUMN IF EXISTS challenge_type;
+        ALTER TABLE rewarded_ad_events ADD CONSTRAINT rewarded_ad_events_challenge_id_fkey
+            FOREIGN KEY (challenge_id) REFERENCES ad_spin_challenges(challenge_id) ON DELETE CASCADE;
+        """);
+}

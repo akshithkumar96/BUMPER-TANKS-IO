@@ -73,12 +73,23 @@ namespace BumperTanks.Frontend
 
         public void Show(string challengeId, Action<int> onReward, Action<string> onError)
         {
+            ShowInternal(challengeId, onReward, onError, false);
+        }
+
+        public void ShowMatchBonus(string challengeId, Action<int> onReward, Action<string> onError)
+        {
+            ShowInternal(challengeId, onReward, onError, true);
+        }
+
+        private void ShowInternal(string challengeId, Action<int> onReward, Action<string> onError, bool isMatchBonus)
+        {
 #if UNITY_ANDROID || UNITY_IOS
             if (rewardedAd == null || !rewardedAd.IsAdReady()) { onError?.Invoke("Rewarded video is not ready. Try again shortly."); return; }
             LevelPlay.SetMetaData("LevelPlay_Rewarded_Server_Params", new[] { "challengeId=" + challengeId });
             rewardHandler = onReward;
             errorHandler = onError;
             currentChallengeId = challengeId;
+            currentRewardIsMatchBonus = isMatchBonus;
             rewardEventReceived = false;
             rewardedAd.ShowAd();
 #else
@@ -90,6 +101,7 @@ namespace BumperTanks.Frontend
         private Action<int> rewardHandler;
         private Action<string> errorHandler;
         private bool rewardEventReceived;
+        private bool currentRewardIsMatchBonus;
         private void OnInitialized(LevelPlayConfiguration _)
         {
             var unitId = Application.platform == RuntimePlatform.Android ? settings.androidRewardedAdUnitId : settings.iosRewardedAdUnitId;
@@ -102,9 +114,13 @@ namespace BumperTanks.Frontend
         }
         private void OnAdRewarded(LevelPlayAdInfo _, LevelPlayReward __)
         {
+            if (rewardEventReceived) return;
             // The device never grants coins. Only the signed LevelPlay S2S callback can complete this challenge.
             rewardEventReceived = true;
-            GameServiceClient.Instance?.PollAdSpinStatus(currentChallengeId, rewardHandler, errorHandler);
+            if (currentRewardIsMatchBonus)
+                GameServiceClient.Instance?.PollMatchBonusStatus(currentChallengeId, rewardHandler, errorHandler);
+            else
+                GameServiceClient.Instance?.PollAdSpinStatus(currentChallengeId, rewardHandler, errorHandler);
         }
         private string currentChallengeId;
         private void OnAdClosed(LevelPlayAdInfo _)

@@ -6,6 +6,7 @@ public sealed class GameStorageContext(DbContextOptions<GameStorageContext> opti
     public DbSet<IdentityTokenRow> IdentityTokens => Set<IdentityTokenRow>();
     public DbSet<CompletedMatchRow> CompletedMatches => Set<CompletedMatchRow>();
     public DbSet<AdSpinChallengeRow> AdSpinChallenges => Set<AdSpinChallengeRow>();
+    public DbSet<MatchBonusChallengeRow> MatchBonusChallenges => Set<MatchBonusChallengeRow>();
     public DbSet<RewardedAdEventRow> RewardedAdEvents => Set<RewardedAdEventRow>();
     public DbSet<TelemetryEventRow> TelemetryEvents => Set<TelemetryEventRow>();
     public DbSet<CrashReportRow> CrashReports => Set<CrashReportRow>();
@@ -55,6 +56,22 @@ public sealed class GameStorageContext(DbContextOptions<GameStorageContext> opti
             entity.HasIndex(row => new { row.PlayerId, row.Day, row.Completed });
             entity.HasOne<ProfileRow>().WithMany().HasForeignKey(row => row.PlayerId).OnDelete(DeleteBehavior.Cascade);
         });
+        modelBuilder.Entity<MatchBonusChallengeRow>(entity =>
+        {
+            entity.ToTable("match_bonus_challenges");
+            entity.HasKey(row => row.ChallengeId);
+            entity.Property(row => row.ChallengeId).HasColumnName("challenge_id").HasMaxLength(32);
+            entity.Property(row => row.PlayerId).HasColumnName("player_id").HasMaxLength(32);
+            entity.Property(row => row.MatchId).HasColumnName("match_id").HasMaxLength(32);
+            entity.Property(row => row.CreatedUtc).HasColumnName("created_utc");
+            entity.Property(row => row.ExpiresUtc).HasColumnName("expires_utc");
+            entity.Property(row => row.Completed).HasColumnName("completed");
+            entity.Property(row => row.Award).HasColumnName("award");
+            entity.Property(row => row.EventId).HasColumnName("event_id");
+            entity.Property(row => row.CallbackTimestamp).HasColumnName("callback_timestamp");
+            entity.HasIndex(row => new { row.PlayerId, row.MatchId }).IsUnique();
+            entity.HasOne<ProfileRow>().WithMany().HasForeignKey(row => row.PlayerId).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<RewardedAdEventRow>(entity =>
         {
             entity.ToTable("rewarded_ad_events");
@@ -62,7 +79,7 @@ public sealed class GameStorageContext(DbContextOptions<GameStorageContext> opti
             entity.Property(row => row.EventId).HasColumnName("event_id").HasMaxLength(128);
             entity.Property(row => row.PlayerId).HasColumnName("player_id").HasMaxLength(32);
             entity.Property(row => row.ChallengeId).HasColumnName("challenge_id").HasMaxLength(32);
-            entity.HasOne<AdSpinChallengeRow>().WithMany().HasForeignKey(row => row.ChallengeId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(row => row.ChallengeType).HasColumnName("challenge_type").HasMaxLength(24);
         });
         modelBuilder.Entity<TelemetryEventRow>(entity =>
         {
@@ -127,11 +144,25 @@ public sealed class AdSpinChallengeRow
     public string CallbackTimestamp { get; set; } = string.Empty;
 }
 
+public sealed class MatchBonusChallengeRow
+{
+    public string ChallengeId { get; set; } = string.Empty;
+    public string PlayerId { get; set; } = string.Empty;
+    public string MatchId { get; set; } = string.Empty;
+    public DateTimeOffset CreatedUtc { get; set; }
+    public DateTimeOffset ExpiresUtc { get; set; }
+    public bool Completed { get; set; }
+    public int Award { get; set; }
+    public string EventId { get; set; } = string.Empty;
+    public string CallbackTimestamp { get; set; } = string.Empty;
+}
+
 public sealed class RewardedAdEventRow
 {
     public string EventId { get; set; } = string.Empty;
     public string PlayerId { get; set; } = string.Empty;
     public string ChallengeId { get; set; } = string.Empty;
+    public string ChallengeType { get; set; } = "daily_spin";
 }
 
 public sealed class TelemetryEventRow

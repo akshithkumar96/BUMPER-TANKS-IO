@@ -198,9 +198,46 @@ namespace BumperTanks.Frontend
 
         public bool CanWatchAdBonusSpin => EndpointConfigurationValid && LevelPlayRewardedSpinService.IsConfigured;
 
+        public bool CanWatchAdMatchBonus => EndpointConfigurationValid && IdentityReady && LevelPlayRewardedSpinService.IsConfigured;
+
         public void WatchAdBonusSpin(Action<int> onSuccess, Action<string> onError)
         {
             StartCoroutine(CreateAdSpinChallenge(challenge => LevelPlayRewardedSpinService.Instance.Show(challenge, onSuccess, onError), onError));
+        }
+
+        public void WatchAdMatchBonus(string matchId, int expectedAward, Action<int> onSuccess, Action<string> onError)
+        {
+            if (!CanWatchAdMatchBonus || expectedAward <= 0 || string.IsNullOrWhiteSpace(matchId))
+            {
+                onError?.Invoke("A verified match reward is not available for doubling.");
+                return;
+            }
+            var rewardedAds = LevelPlayRewardedSpinService.Instance;
+            if (rewardedAds == null)
+            {
+                onError?.Invoke("Rewarded video is unavailable on this device.");
+                return;
+            }
+
+            var request = new MatchBonusRequest(ProfileStore.GetServerPlayerId(), matchId);
+            StartCoroutine(PostJsonResponse("/v1/rewards/ad/match/challenge", JsonUtility.ToJson(request), response =>
+            {
+                var challenge = JsonUtility.FromJson<MatchBonusChallengeResponse>(response);
+                if (challenge == null || string.IsNullOrEmpty(challenge.challengeId) || challenge.award != expectedAward)
+                {
+                    onError?.Invoke("The server match reward did not match this result.");
+                    return;
+                }
+                rewardedAds.ShowMatchBonus(challenge.challengeId, award =>
+                {
+                    if (award != expectedAward)
+                    {
+                        onError?.Invoke("The verified bonus did not match this match's reward.");
+                        return;
+                    }
+                    onSuccess?.Invoke(award);
+                }, onError);
+            }, onError));
         }
 
         private IEnumerator CreateAdSpinChallenge(Action<string> onSuccess, Action<string> onError)
@@ -217,6 +254,33 @@ namespace BumperTanks.Frontend
         public void PollAdSpinStatus(string challengeId, Action<int> onComplete, Action<string> onError = null)
         {
             StartCoroutine(PollAdSpin(challengeId, onComplete, onError));
+        }
+
+        public void PollMatchBonusStatus(string challengeId, Action<int> onComplete, Action<string> onError = null)
+        {
+            StartCoroutine(PollAdRewardStatus("/v1/rewards/ad/match/status/" + challengeId, onComplete, onError));
+        }
+
+        private IEnumerator PollAdRewardStatus(string path, Action<int> onComplete, Action<string> onError)
+        {
+            var deadline = Time.realtimeSinceStartup + 90f;
+            while (Time.realtimeSinceStartup < deadline)
+            {
+                var done = false;
+                yield return GetJson(path, response =>
+                {
+                    var status = JsonUtility.FromJson<AdSpinStatusResponse>(response);
+                    if (status != null && status.completed)
+                    {
+                        if (status.profile != null) SetServerProfile(status.profile);
+                        onComplete?.Invoke(status.award);
+                        done = true;
+                    }
+                }, error => { onError?.Invoke(error); done = true; });
+                if (done) yield break;
+                yield return new WaitForSecondsRealtime(2f);
+            }
+            onError?.Invoke("Reward verification is still pending. Keep this result open and retry the status check.");
         }
 
         private IEnumerator PollAdSpin(string challengeId, Action<int> onComplete, Action<string> onError)
@@ -379,6 +443,13 @@ namespace BumperTanks.Frontend
         private sealed class DailyRewardResponse { public ServerProfile profile; public int award; }
 
         [Serializable] private sealed class AdSpinChallengeResponse { public string challengeId; }
+        [Serializable] private sealed class MatchBonusRequest
+        {
+            public string PlayerId;
+            public string MatchId;
+            public MatchBonusRequest(string playerId, string matchId) => (PlayerId, MatchId) = (playerId, matchId);
+        }
+        [Serializable] private sealed class MatchBonusChallengeResponse { public string challengeId; public int award; }
         [Serializable] private sealed class AdSpinStatusResponse { public bool completed; public int award; public ServerProfile profile; }
 
         [Serializable]

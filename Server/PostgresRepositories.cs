@@ -86,7 +86,7 @@ public sealed class PostgresProfileRepository(DbContextOptions<GameStorageContex
                 var challenge = db.AdSpinChallenges.SingleOrDefault(item => item.ChallengeId == challengeId);
                 if (priorEvent != null)
                 {
-                    if (priorEvent.PlayerId == playerId && priorEvent.ChallengeId == challengeId && challenge is { Completed: true } && challenge.PlayerId == playerId)
+                    if (priorEvent.ChallengeType == "daily_spin" && priorEvent.PlayerId == playerId && priorEvent.ChallengeId == challengeId && challenge is { Completed: true } && challenge.PlayerId == playerId)
                         return new AdCompletion(true, true, ToProfile(current), challenge.Award);
                     return new AdCompletion(false, true, ToProfile(current), 0);
                 }
@@ -101,7 +101,7 @@ public sealed class PostgresProfileRepository(DbContextOptions<GameStorageContex
                 challenge.Award = award;
                 challenge.EventId = eventId;
                 challenge.CallbackTimestamp = callbackAt.ToString("yyyyMMddHHmm");
-                db.RewardedAdEvents.Add(new RewardedAdEventRow { EventId = eventId, PlayerId = playerId, ChallengeId = challengeId });
+                db.RewardedAdEvents.Add(new RewardedAdEventRow { EventId = eventId, PlayerId = playerId, ChallengeId = challengeId, ChallengeType = "daily_spin" });
                 db.SaveChanges();
                 return new AdCompletion(true, false, ToProfile(current), award);
             });
@@ -124,6 +124,106 @@ public sealed class PostgresProfileRepository(DbContextOptions<GameStorageContex
         using var db = new GameStorageContext(options);
         var challenge = db.AdSpinChallenges.AsNoTracking().SingleOrDefault(item => item.ChallengeId == challengeId && item.PlayerId == playerId);
         return challenge == null ? null : ToChallenge(challenge);
+    }
+
+    public MatchBonusChallenge CreateMatchBonusChallenge(string playerId, string matchId) => InPlayerTransaction(playerId, (db, current) =>
+    {
+        var completedMatch = db.CompletedMatches.AsNoTracking().SingleOrDefault(item => item.PlayerId == playerId && item.MatchId == matchId);
+        if (completedMatch == null || completedMatch.Award <= 0)
+            throw new InvalidOperationException("match reward is not eligible for doubling");
+        if ((long)current.BattleCoins + completedMatch.Award > int.MaxValue)
+            throw new InvalidOperationException("battle coin balance cannot accept the bonus");
+
+        var now = DateTimeOffset.UtcNow;
+        var existing = db.MatchBonusChallenges.SingleOrDefault(item => item.PlayerId == playerId && item.MatchId == matchId);
+        if (existing is { Completed: true }) throw new InvalidOperationException("match reward bonus already claimed");
+        if (existing != null)
+        {
+            if (existing.ExpiresUtc > now) return ToMatchBonusChallenge(existing);
+            existing.CreatedUtc = now;
+            existing.ExpiresUtc = now.AddDays(7);
+            existing.Award = completedMatch.Award;
+            existing.EventId = string.Empty;
+            existing.CallbackTimestamp = string.Empty;
+            db.SaveChanges();
+            return ToMatchBonusChallenge(existing);
+        }
+
+        var challenge = new MatchBonusChallengeRow
+        {
+            ChallengeId = "mb" + Guid.NewGuid().ToString("N")[..30],
+            PlayerId = playerId,
+            MatchId = matchId,
+            CreatedUtc = now,
+            ExpiresUtc = now.AddDays(7),
+            Completed = false,
+            Award = completedMatch.Award,
+            EventId = string.Empty,
+            CallbackTimestamp = string.Empty
+        };
+        db.MatchBonusChallenges.Add(challenge);
+        db.SaveChanges();
+        return ToMatchBonusChallenge(challenge);
+    });
+
+    public bool TryCompleteMatchBonus(string challengeId, string eventId, string playerId, DateTimeOffset callbackAt,
+        out PlayerProfile updated, out int award, out bool duplicate)
+    {
+        AdCompletion result;
+        try
+        {
+            result = InPlayerTransaction(playerId, (db, current) =>
+            {
+                var priorEvent = db.RewardedAdEvents.AsNoTracking().SingleOrDefault(item => item.EventId == eventId);
+                var challenge = db.MatchBonusChallenges.SingleOrDefault(item => item.ChallengeId == challengeId);
+                if (priorEvent != null)
+                {
+                    if (priorEvent.ChallengeType == "match_bonus" && priorEvent.PlayerId == playerId && priorEvent.ChallengeId == challengeId &&
+                        challenge is { Completed: true } && challenge.PlayerId == playerId)
+                        return new AdCompletion(true, true, ToProfile(current), challenge.Award);
+                    return new AdCompletion(false, true, ToProfile(current), 0);
+                }
+
+                if (challenge == null || challenge.Completed || challenge.PlayerId != playerId || challenge.ExpiresUtc < DateTimeOffset.UtcNow ||
+                    callbackAt < challenge.CreatedUtc.AddMinutes(-1) || callbackAt > challenge.ExpiresUtc)
+                    return new AdCompletion(false, false, ToProfile(current), 0);
+                var completedMatch = db.CompletedMatches.AsNoTracking().SingleOrDefault(item => item.PlayerId == playerId && item.MatchId == challenge.MatchId);
+                if (completedMatch == null || completedMatch.Award != challenge.Award || (long)current.BattleCoins + challenge.Award > int.MaxValue)
+                    return new AdCompletion(false, false, ToProfile(current), 0);
+
+                current.BattleCoins += challenge.Award;
+                challenge.Completed = true;
+                challenge.EventId = eventId;
+                challenge.CallbackTimestamp = callbackAt.ToString("yyyyMMddHHmm");
+                db.RewardedAdEvents.Add(new RewardedAdEventRow
+                {
+                    EventId = eventId,
+                    PlayerId = playerId,
+                    ChallengeId = challengeId,
+                    ChallengeType = "match_bonus"
+                });
+                db.SaveChanges();
+                return new AdCompletion(true, false, ToProfile(current), challenge.Award);
+            });
+        }
+        catch (DbUpdateException exception) when (IsUniqueViolation(exception))
+        {
+            updated = GetOrCreate(playerId);
+            award = 0;
+            duplicate = true;
+            return false;
+        }
+        updated = result.Profile;
+        award = result.Award;
+        duplicate = result.Duplicate;
+        return result.Success;
+    }
+
+    public MatchBonusChallenge? GetMatchBonusChallenge(string challengeId, string playerId)
+    {
+        using var db = new GameStorageContext(options);
+        var challenge = db.MatchBonusChallenges.AsNoTracking().SingleOrDefault(item => item.ChallengeId == challengeId && item.PlayerId == playerId);
+        return challenge == null ? null : ToMatchBonusChallenge(challenge);
     }
 
     public void Save(PlayerProfile profile)
@@ -218,6 +318,9 @@ public sealed class PostgresProfileRepository(DbContextOptions<GameStorageContex
 
     private static AdSpinChallenge ToChallenge(AdSpinChallengeRow row) =>
         new(row.ChallengeId, row.PlayerId, row.Day, row.CreatedUtc, row.ExpiresUtc, row.Completed, row.Award, row.EventId, row.CallbackTimestamp);
+
+    private static MatchBonusChallenge ToMatchBonusChallenge(MatchBonusChallengeRow row) =>
+        new(row.ChallengeId, row.PlayerId, row.MatchId, row.CreatedUtc, row.ExpiresUtc, row.Completed, row.Award, row.EventId, row.CallbackTimestamp);
 
     private sealed record RewardResult(bool Success, PlayerProfile Profile, int Award);
     private sealed record AdCompletion(bool Success, bool Duplicate, PlayerProfile Profile, int Award);

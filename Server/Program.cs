@@ -135,6 +135,30 @@ app.MapGet("/v1/rewards/ad/status/{challengeId}", (string challengeId, HttpReque
     return Results.Ok(new AdSpinStatusResponse(challenge.Completed, challenge.Award, profile));
 }).RequireRateLimiting("rewards");
 
+app.MapPost("/v1/rewards/ad/match/challenge", (MatchBonusRewardRequest request, HttpRequest httpRequest) =>
+{
+    if (!TryGetAuthenticatedPlayer(identities, httpRequest, out var authenticatedPlayerId)) return Results.Unauthorized();
+    if (!string.Equals(request.PlayerId, authenticatedPlayerId, StringComparison.Ordinal)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!RequestValidation.IsPlayerId(request.PlayerId) || !RequestValidation.IsMatchId(request.MatchId))
+        return Results.BadRequest(new { error = "invalid match bonus request" });
+    if (string.IsNullOrWhiteSpace(builder.Configuration["Rewards:LevelPlayPrivateKey"])) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    try
+    {
+        var challenge = profiles.CreateMatchBonusChallenge(request.PlayerId, request.MatchId);
+        return Results.Ok(new MatchBonusChallengeResponse(challenge.ChallengeId, challenge.ExpiresUtc, challenge.Award));
+    }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).RequireRateLimiting("rewards");
+
+app.MapGet("/v1/rewards/ad/match/status/{challengeId}", (string challengeId, HttpRequest httpRequest) =>
+{
+    if (!TryGetAuthenticatedPlayer(identities, httpRequest, out var authenticatedPlayerId)) return Results.Unauthorized();
+    var challenge = profiles.GetMatchBonusChallenge(challengeId, authenticatedPlayerId);
+    if (challenge == null) return Results.NotFound();
+    var profile = challenge.Completed ? profiles.GetOrCreate(authenticatedPlayerId) : null;
+    return Results.Ok(new AdSpinStatusResponse(challenge.Completed, challenge.Award, profile));
+}).RequireRateLimiting("rewards");
+
 app.MapGet("/v1/rewards/ad/levelplay-callback", (HttpRequest request) =>
 {
     var key = builder.Configuration["Rewards:LevelPlayPrivateKey"];
@@ -158,7 +182,10 @@ app.MapGet("/v1/rewards/ad/levelplay-callback", (HttpRequest request) =>
     var expected = Convert.ToHexString(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(timestamp + eventId + userId + rewards + key))).ToLowerInvariant();
     if (signature.Length != expected.Length || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.ASCII.GetBytes(signature.ToLowerInvariant()), System.Text.Encoding.ASCII.GetBytes(expected)))
         return Results.Unauthorized();
-    if (!profiles.TryCompleteAdSpin(challengeId, eventId, userId, callbackAt, out _, out _, out _)) return Results.Conflict("invalid or consumed challenge");
+    var completed = challengeId.StartsWith("mb", StringComparison.Ordinal)
+        ? profiles.TryCompleteMatchBonus(challengeId, eventId, userId, callbackAt, out _, out _, out _)
+        : profiles.TryCompleteAdSpin(challengeId, eventId, userId, callbackAt, out _, out _, out _);
+    if (!completed) return Results.Conflict("invalid or consumed challenge");
     return Results.Text(eventId + ":OK");
 }).RequireRateLimiting("rewards");
 
@@ -252,6 +279,8 @@ public sealed record PlayerProfile(string PlayerId, int BattleCoins, int Matches
 public sealed record DailyRewardRequest(string PlayerId);
 public sealed record DailyRewardResponse(PlayerProfile Profile, int Award);
 public sealed record AdSpinChallengeResponse(string ChallengeId, DateTimeOffset ExpiresUtc);
+public sealed record MatchBonusRewardRequest(string PlayerId, string MatchId);
+public sealed record MatchBonusChallengeResponse(string ChallengeId, DateTimeOffset ExpiresUtc, int Award);
 public sealed record AdSpinStatusResponse(bool Completed, int Award, PlayerProfile? Profile);
 public sealed record CosmeticPurchaseRequest(string PlayerId, string CosmeticId);
 public sealed record CosmeticPurchaseResponse(PlayerProfile Profile, string CosmeticId);

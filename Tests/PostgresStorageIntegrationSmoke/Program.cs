@@ -64,6 +64,27 @@ var matchClaims = await ParallelResults(20, index =>
 });
 if (matchClaims.Count(success => success) != 1)
     throw new InvalidOperationException($"Expected one idempotent match award; got {matchClaims.Count(success => success)}.");
+var baseMatchProfile = second.Profiles.GetOrCreate(playerId);
+var matchBonusChallenge = first.Profiles.CreateMatchBonusChallenge(playerId, matchId);
+if (matchBonusChallenge.Award != 17 || second.Profiles.CreateMatchBonusChallenge(playerId, matchId).ChallengeId != matchBonusChallenge.ChallengeId)
+    throw new InvalidOperationException("PostgreSQL did not bind repeated bonus challenge requests to the completed match award.");
+var matchBonusEvent = "match-bonus-event-" + Guid.NewGuid().ToString("N");
+var matchBonusCallbacks = new ConcurrentBag<(bool Success, bool Duplicate, int Award)>();
+await Parallel.ForEachAsync(Enumerable.Range(0, 20), async (index, cancellationToken) =>
+{
+    var store = index % 2 == 0 ? first.Profiles : second.Profiles;
+    var success = store.TryCompleteMatchBonus(matchBonusChallenge.ChallengeId, matchBonusEvent, playerId,
+        DateTimeOffset.UtcNow, out _, out var award, out var duplicate);
+    matchBonusCallbacks.Add((success, duplicate, award));
+    await Task.CompletedTask;
+});
+if (matchBonusCallbacks.Any(result => !result.Success) || matchBonusCallbacks.Count(result => !result.Duplicate) != 1 ||
+    matchBonusCallbacks.Any(result => result.Award != 17) || second.Profiles.GetOrCreate(playerId).BattleCoins != baseMatchProfile.BattleCoins + 17)
+    throw new InvalidOperationException("PostgreSQL match bonus callbacks did not produce exactly one idempotent additional award.");
+if (first.Profiles.TryCompleteMatchBonus(matchBonusChallenge.ChallengeId, "second-match-bonus-event", playerId,
+        DateTimeOffset.UtcNow, out var afterSecondEvent, out _, out _) ||
+    afterSecondEvent.BattleCoins != baseMatchProfile.BattleCoins + 17)
+    throw new InvalidOperationException("A second LevelPlay event doubled a completed match reward twice.");
 
 var purchases = await ParallelResults(20, index =>
 {
@@ -161,7 +182,7 @@ var retainedCrashReports = second.CrashReports.Snapshot().Where(item => item.Pla
 if (retainedCrashReports.Length != CrashReportRepository.MaxRetainedReports || retainedCrashReports.Any(item => item.Fingerprint == expiredFingerprint))
     throw new InvalidOperationException("PostgreSQL crash report retention did not enforce the 30-day expiry and 1,000-record cap.");
 
-Console.WriteLine("PostgreSQL integration smoke passed: single realtime replica lease, two-store identity, concurrent rewards/purchases, rewarded callback idempotency, telemetry sharing/retention, and crash report dedupe/retention.");
+Console.WriteLine("PostgreSQL integration smoke passed: single realtime replica lease, two-store identity, concurrent base/bonus rewards and purchases, rewarded callback idempotency, telemetry sharing/retention, and crash report dedupe/retention.");
 
 static async Task<bool[]> ParallelResults(int count, Func<int, bool> action)
 {
