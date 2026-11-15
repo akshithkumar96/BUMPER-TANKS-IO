@@ -27,6 +27,9 @@ services:
       Storage__Provider: PostgreSQL
       ConnectionStrings__GameDatabase: Host=database;Port=5432;Database=bumper_tanks;Username=bumper;Password=${BUMPER_POSTGRES_PASSWORD:-bumper-local-development-only}
       Cors__AllowedOrigins: ${BUMPER_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:8080}
+      Rewards__LevelPlayPrivateKey: ${BUMPER_LEVELPLAY_PRIVATE_KEY:-}
+      Rewards__MatchAttestationSecret: ${BUMPER_MATCH_ATTESTATION_SECRET:-}
+      Rewards__RequireMatchAttestation: ${BUMPER_REQUIRE_MATCH_ATTESTATION:-}
     ports:
       - "8080:8080"
 
