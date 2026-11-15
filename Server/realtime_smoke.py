@@ -478,7 +478,7 @@ def drive_toward_pickups(clients, player_ids, snapshot):
         magnet_owner = active_owners["magnetActive"]
         if (all(active_owners[field] is not None for field in active_fields) and
                 magnet_owner is not None and magnet_owner.get("gems", 0) >= 1):
-            return current, ticks[0], collected_at
+            return current, dict(zip(player_ids, ticks)), collected_at
     raise AssertionError(f"Could not collect randomized power-ups and magnetized gem: {current}")
 
 
@@ -828,7 +828,7 @@ def main():
         initial = wait_for(first, lambda message: message.get("type") == "snapshot" and
                            len(message.get("powerUps", [])) == 3, timeout=3)
         assert_randomized_powerups(initial)
-        moved, first_last_input_tick, powerup_collected_at = drive_toward_pickups(
+        moved, last_input_ticks, powerup_collected_at = drive_toward_pickups(
             [first, second, clients[2]], first_room_player_ids[:3], initial)
         first_room_players = [player for player in moved["players"] if player["playerId"] > 0]
         assert len(first_room_players) == 8, moved
@@ -838,21 +838,25 @@ def main():
                    for player in first_room_players), moved
         first_state = next(player for player in first_room_players if player["playerId"] == first_join["playerId"])
         second_state = next(player for player in first_room_players if player["playerId"] == second_join["playerId"])
+        mega_bullet_state = next(player for player in first_room_players if player.get("megaBulletActive"))
         magnet_state = next(player for player in first_room_players if player.get("magnetActive"))
-        assert first_state["archetype"] == "SpeedyBumper" and first_state["megaBulletActive"], moved
+        assert first_state["archetype"] == "SpeedyBumper", moved
         assert any(player.get("nitroActive") for player in first_room_players), moved
         assert magnet_state["magnetActive"] and magnet_state["gems"] >= 1, moved
         assert len(moved["gems"]) < 12, moved
         assert not moved["powerUps"], moved
 
         # Verify a live shot before running the separate 2.5-second bot-fill scenario.
-        combat_shooter_id = first_room_player_ids[0]
+        combat_shooter_id = mega_bullet_state["playerId"]
+        combat_client = clients[first_room_player_ids.index(combat_shooter_id)]
         target_id = clear_shot_target(moved, combat_shooter_id)["playerId"]
         hit, target_state, previous_health, shooter_last_client_tick = fire_until_hit(
-            first, moved, combat_shooter_id, target_id, first_last_input_tick, retarget=True)
+            combat_client, moved, combat_shooter_id, target_id,
+            last_input_ticks.get(combat_shooter_id, 0), retarget=True)
         impulse_speed = math.hypot(target_state["velocity"]["x"], target_state["velocity"]["y"])
         assert target_state["health"] < previous_health and impulse_speed > 0.5, target_state
-        last_client_tick = shooter_last_client_tick
+        last_client_tick = (shooter_last_client_tick if combat_shooter_id == first_join["playerId"]
+                            else last_input_ticks.get(first_join["playerId"], 0))
 
         time.sleep(0.05)  # Let zero-movement frames settle before joining the next room.
 
