@@ -15,13 +15,16 @@ import urllib.request
 
 
 class WebSocketClient:
-    def __init__(self, address, origin=None):
+    def __init__(self, address, origin=None, read_messages=True, receive_buffer_size=None):
         host, port = address.rsplit(":", 1)
         self.socket = socket.create_connection((host, int(port)), timeout=5)
         self.socket.settimeout(5)
+        if receive_buffer_size is not None:
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, receive_buffer_size)
         self.buffer = bytearray()
         self.messages = queue.Queue()
         self.reading = True
+        self.reader = None
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         request = (
             "GET /v1/realtime HTTP/1.1\r\n"
@@ -42,8 +45,9 @@ class WebSocketClient:
             status = header.split(b"\r\n", 1)[0].decode("ascii", errors="replace")
             self.socket.close()
             raise ConnectionError(f"WebSocket upgrade rejected: {status}")
-        self.reader = threading.Thread(target=self._read_messages, daemon=True)
-        self.reader.start()
+        if read_messages:
+            self.reader = threading.Thread(target=self._read_messages, daemon=True)
+            self.reader.start()
 
     def send(self, message):
         payload = json.dumps(message, separators=(",", ":")).encode("utf-8") + b"\n"
@@ -58,9 +62,11 @@ class WebSocketClient:
         masked = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
         self.socket.sendall(header + mask + masked)
 
-    def receive(self):
+    def receive(self, timeout=5):
+        if self.reader is None:
+            return self._receive_frame()
         try:
-            return self.messages.get(timeout=5)
+            return self.messages.get(timeout=timeout)
         except queue.Empty as error:
             raise socket.timeout() from error
 
@@ -151,13 +157,26 @@ def join_identity(address, index, identity, origin=None, archetype=None):
         message["archetype"] = archetype
     client.send(message)
     response = client.receive()
-    assert response["type"] == "joined", response
+    if response.get("type") != "joined":
+        client.close()
+        raise AssertionError(response)
     assert response["tickRate"] == 30, response
     assert isinstance(response["playerId"], int), response
     assert len(response["roomId"]) == 32, response
     response["_externalPlayerId"] = identity["playerId"]
     response["_accessToken"] = identity["accessToken"]
     return client, response
+
+
+def reconnect_identity(address, index, identity, origin=None, archetype=None, timeout=3):
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return join_identity(address, index, identity, origin=origin, archetype=archetype)
+        except AssertionError as error:
+            if "player_already_connected" not in str(error) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 def assert_join_rejected(address, player_id, token=None):
@@ -238,6 +257,58 @@ def smoke_bot_fill_queue_latency(address, sample_count=5):
           "(GDD average target < 3.000s).")
 
 
+def smoke_slow_consumer(address):
+    clients = []
+    try:
+        slow_identity = create_identity(address)
+        slow = WebSocketClient(address, read_messages=False, receive_buffer_size=1024)
+        clients.append(slow)
+        slow.send({"type": "join", "playerId": slow_identity["playerId"], "accessToken": slow_identity["accessToken"],
+                   "displayName": "Slow Reader"})
+        slow_join = slow.receive()
+        assert slow_join.get("type") == "joined", slow_join
+
+        healthy = None
+        room_id = slow_join["roomId"]
+        for index in range(7):
+            client, joined = join(address, f"healthy-{index + 1}")
+            clients.append(client)
+            assert joined["roomId"] == room_id, joined
+            if healthy is None:
+                healthy = client
+
+        wait_for(healthy, lambda message: message.get("type") == "snapshot", timeout=3)
+        time.sleep(0.3)
+        latest_tick = -1
+        while True:
+            try:
+                message = healthy.messages.get_nowait()
+            except queue.Empty:
+                break
+            if message.get("type") == "snapshot":
+                latest_tick = max(latest_tick, message.get("tick", -1))
+
+        started_at = time.monotonic()
+        deadline = started_at + 1.5
+        observed_ticks = []
+        while len(observed_ticks) < 20 and time.monotonic() < deadline:
+            try:
+                message = healthy.receive(timeout=max(0.01, deadline - time.monotonic()))
+            except socket.timeout:
+                break
+            if message.get("type") == "snapshot" and message.get("tick", -1) > latest_tick:
+                latest_tick = message["tick"]
+                observed_ticks.append(latest_tick)
+
+        elapsed = time.monotonic() - started_at
+        assert len(observed_ticks) >= 20 and elapsed < 1.5, (elapsed, observed_ticks)
+        assert observed_ticks[-1] - observed_ticks[0] >= 19, observed_ticks
+        print(f"Realtime slow-consumer smoke passed: healthy peer received 20 snapshots in {elapsed:.3f}s while another socket stopped reading.")
+    finally:
+        for client in clients:
+            client.close()
+
+
 def smoke_reconnect(address, grace_seconds):
     identity = create_identity(address)
     original, joined = join_identity(address, "resume", identity)
@@ -253,7 +324,7 @@ def smoke_reconnect(address, grace_seconds):
     before = next(player for player in changed["players"] if player["playerId"] == joined["playerId"])
     assert before["health"] < 100 or before["gems"] > 0 or math.hypot(before["velocity"]["x"], before["velocity"]["y"]) > 0.5, (initial_state, before)
     original.close()
-    resumed, resumed_join = join_identity(address, "resume", identity)
+    resumed, resumed_join = reconnect_identity(address, "resume", identity)
     assert resumed_join["roomId"] == joined["roomId"] and resumed_join["playerId"] == joined["playerId"], resumed_join
     resumed_state = wait_for(resumed, lambda message: message.get("type") == "snapshot" and
                              any(player["playerId"] == joined["playerId"] for player in message.get("players", [])))
@@ -651,6 +722,9 @@ def main():
     if len(sys.argv) > 2 and sys.argv[2] == "--queue-only":
         smoke_bot_fill_queue_latency(address)
         return
+    if len(sys.argv) > 2 and sys.argv[2] == "--slow-consumer-only":
+        smoke_slow_consumer(address)
+        return
     clients = []
     first_room_player_ids = []
     try:
@@ -671,6 +745,7 @@ def main():
         assert_join_rejected(address, first_identity["playerId"], "f" * 64)
         assert_join_rejected(address, second_identity["playerId"], first_identity["accessToken"])
 
+        smoke_slow_consumer(address)
         smoke_bot_fill_queue_latency(address)
         smoke_reconnect(address, float(os.environ.get("REALTIME_DISCONNECT_GRACE_SECONDS", "30")))
         smoke_latency_and_jitter(address)
@@ -805,7 +880,7 @@ def main():
                            "accessToken": clients[7]._identity_access_token}
         clients[7].close()
         clients[7] = None
-        resumed, resumed_join = join_identity(address, 8, resume_identity)
+        resumed, resumed_join = reconnect_identity(address, 8, resume_identity)
         clients[7] = resumed
         assert resumed_join["roomId"] == first_join["roomId"] and resumed_join["playerId"] == last_real_player, resumed_join
         resumed_snapshot = wait_for(resumed, lambda message: message.get("type") == "snapshot" and

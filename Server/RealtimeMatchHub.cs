@@ -644,7 +644,12 @@ public sealed class RealtimeMatchHub : IDisposable
                         };
                     }
                     if (snapshot is not null && recipients.Length > 0)
-                        await Task.WhenAll(recipients.Select(connection => SendSnapshotSafelyAsync(connection, snapshot, token)));
+                    {
+                        if (finished)
+                            await Task.WhenAll(recipients.Select(connection => SendSnapshotSafelyAsync(connection, snapshot, token)));
+                        else
+                            foreach (var connection in recipients) connection.TrySendSnapshot(snapshot, token);
+                    }
                     if (matchReceipts.Count > 0)
                         await Task.WhenAll(matchReceipts.Select(receipt => SendMatchReceiptSafelyAsync(receipt.Connection, receipt.Receipt, token)));
                     if (finished)
@@ -1213,6 +1218,7 @@ public sealed class RealtimeMatchHub : IDisposable
     {
         private readonly WebSocket socket;
         private readonly SemaphoreSlim sendGate = new(1, 1);
+        private int snapshotSendActive;
 
         public RealtimeConnection(WebSocket socket) => this.socket = socket;
 
@@ -1223,16 +1229,39 @@ public sealed class RealtimeMatchHub : IDisposable
             var frame = new byte[json.Length + 1];
             Buffer.BlockCopy(json, 0, frame, 0, json.Length);
             frame[^1] = (byte)'\n';
-            await sendGate.WaitAsync(cancellationToken);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            var entered = false;
             try
             {
+                await sendGate.WaitAsync(timeout.Token);
+                entered = true;
                 if (socket.State == WebSocketState.Open)
-                    await socket.SendAsync(frame.AsMemory(), WebSocketMessageType.Text, true, cancellationToken);
+                    await socket.SendAsync(frame.AsMemory(), WebSocketMessageType.Text, true, timeout.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                socket.Abort();
             }
             finally
             {
-                sendGate.Release();
+                if (entered) sendGate.Release();
             }
+        }
+
+        public void TrySendSnapshot(object snapshot, CancellationToken cancellationToken)
+        {
+            if (Interlocked.CompareExchange(ref snapshotSendActive, 1, 0) != 0) return;
+            _ = SendSnapshotAsync(snapshot, cancellationToken);
+        }
+
+        private async Task SendSnapshotAsync(object snapshot, CancellationToken cancellationToken)
+        {
+            try { await SendAsync(snapshot, cancellationToken); }
+            catch (WebSocketException) { }
+            catch (ObjectDisposedException) { }
+            catch (OperationCanceledException) { }
+            finally { Interlocked.Exchange(ref snapshotSendActive, 0); }
         }
 
         public void Dispose() => sendGate.Dispose();
