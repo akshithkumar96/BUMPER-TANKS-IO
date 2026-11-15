@@ -664,10 +664,13 @@ public sealed class RealtimeMatchHub : IDisposable
                     }
                     if (snapshot is not null && recipients.Length > 0)
                     {
+                        // Every recipient receives the same state for this tick. Serialize once so
+                        // the 30 Hz simulation loop does not repeat JSON work for every connection.
+                        var snapshotFrame = RealtimeConnection.EncodeFrame(snapshot);
                         if (finished)
-                            await Task.WhenAll(recipients.Select(connection => SendSnapshotSafelyAsync(connection, snapshot, token)));
+                            await Task.WhenAll(recipients.Select(connection => SendSnapshotSafelyAsync(connection, snapshotFrame, token)));
                         else
-                            foreach (var connection in recipients) connection.TrySendSnapshot(snapshot, token);
+                            foreach (var connection in recipients) connection.TrySendSnapshot(snapshotFrame, token);
                     }
                     if (matchReceipts.Count > 0)
                         await Task.WhenAll(matchReceipts.Select(receipt => SendMatchReceiptSafelyAsync(receipt.Connection, receipt.Receipt, token)));
@@ -687,9 +690,9 @@ public sealed class RealtimeMatchHub : IDisposable
             }
         }
 
-        private static async Task SendSnapshotSafelyAsync(RealtimeConnection connection, object snapshot, CancellationToken cancellationToken)
+        private static async Task SendSnapshotSafelyAsync(RealtimeConnection connection, ReadOnlyMemory<byte> snapshotFrame, CancellationToken cancellationToken)
         {
-            try { await connection.SendAsync(snapshot, cancellationToken); }
+            try { await connection.SendFrameAsync(snapshotFrame, cancellationToken); }
             catch (WebSocketException) { }
             catch (ObjectDisposedException) { }
         }
@@ -1285,10 +1288,21 @@ public sealed class RealtimeMatchHub : IDisposable
         public async Task SendAsync(object payload, CancellationToken cancellationToken)
         {
             if (socket.State != WebSocketState.Open) return;
+            await SendFrameAsync(EncodeFrame(payload), cancellationToken);
+        }
+
+        public static byte[] EncodeFrame(object payload)
+        {
             var json = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
             var frame = new byte[json.Length + 1];
             Buffer.BlockCopy(json, 0, frame, 0, json.Length);
             frame[^1] = (byte)'\n';
+            return frame;
+        }
+
+        public async Task SendFrameAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
+        {
+            if (socket.State != WebSocketState.Open) return;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(2));
             var entered = false;
@@ -1297,7 +1311,7 @@ public sealed class RealtimeMatchHub : IDisposable
                 await sendGate.WaitAsync(timeout.Token);
                 entered = true;
                 if (socket.State == WebSocketState.Open)
-                    await socket.SendAsync(frame.AsMemory(), WebSocketMessageType.Text, true, timeout.Token);
+                    await socket.SendAsync(frame, WebSocketMessageType.Text, true, timeout.Token);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -1309,15 +1323,15 @@ public sealed class RealtimeMatchHub : IDisposable
             }
         }
 
-        public void TrySendSnapshot(object snapshot, CancellationToken cancellationToken)
+        public void TrySendSnapshot(ReadOnlyMemory<byte> snapshotFrame, CancellationToken cancellationToken)
         {
             if (Interlocked.CompareExchange(ref snapshotSendActive, 1, 0) != 0) return;
-            _ = SendSnapshotAsync(snapshot, cancellationToken);
+            _ = SendSnapshotAsync(snapshotFrame, cancellationToken);
         }
 
-        private async Task SendSnapshotAsync(object snapshot, CancellationToken cancellationToken)
+        private async Task SendSnapshotAsync(ReadOnlyMemory<byte> snapshotFrame, CancellationToken cancellationToken)
         {
-            try { await SendAsync(snapshot, cancellationToken); }
+            try { await SendFrameAsync(snapshotFrame, cancellationToken); }
             catch (WebSocketException) { }
             catch (ObjectDisposedException) { }
             catch (OperationCanceledException) { }
