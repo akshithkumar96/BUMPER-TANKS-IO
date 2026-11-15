@@ -210,6 +210,34 @@ def assert_no_snapshot(client, delay=0.35):
         pass
 
 
+def smoke_bot_fill_queue_latency(address, sample_count=5):
+    queue_times = []
+    for sample in range(sample_count):
+        identity = create_identity(address)
+        client = WebSocketClient(address)
+        queued_at = time.monotonic()
+        try:
+            client.send({"type": "join", "playerId": identity["playerId"], "accessToken": identity["accessToken"],
+                         "displayName": f"Queue {sample + 1}"})
+            joined = client.receive()
+            assert joined.get("type") == "joined" and joined.get("tickRate") == 30, joined
+
+            started = wait_for(client, lambda message: message.get("type") == "snapshot", timeout=4)
+            queue_seconds = time.monotonic() - queued_at
+            assert started.get("phase") == "opening" and len(started.get("players", [])) == 8, started
+            queue_times.append(queue_seconds)
+        finally:
+            client.close()
+
+    average_seconds = sum(queue_times) / len(queue_times)
+    worst_seconds = max(queue_times)
+    assert average_seconds < 3.0, queue_times
+    assert worst_seconds <= 3.5, queue_times
+    print("Realtime bot-fill matchmaking latency passed: "
+          f"{len(queue_times)} solo queues, average {average_seconds:.3f}s, worst {worst_seconds:.3f}s "
+          "(GDD average target < 3.000s).")
+
+
 def smoke_reconnect(address, grace_seconds):
     identity = create_identity(address)
     original, joined = join_identity(address, "resume", identity)
@@ -620,6 +648,9 @@ def main():
     if len(sys.argv) > 2 and sys.argv[2] == "--combat-only":
         smoke_combat_interactions(address)
         return
+    if len(sys.argv) > 2 and sys.argv[2] == "--queue-only":
+        smoke_bot_fill_queue_latency(address)
+        return
     clients = []
     first_room_player_ids = []
     try:
@@ -640,6 +671,7 @@ def main():
         assert_join_rejected(address, first_identity["playerId"], "f" * 64)
         assert_join_rejected(address, second_identity["playerId"], first_identity["accessToken"])
 
+        smoke_bot_fill_queue_latency(address)
         smoke_reconnect(address, float(os.environ.get("REALTIME_DISCONNECT_GRACE_SECONDS", "30")))
         smoke_latency_and_jitter(address)
         smoke_combat_interactions(address)
