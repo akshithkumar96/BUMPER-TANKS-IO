@@ -787,6 +787,11 @@ namespace BumperTanks.Gameplay
 
         private void OnRealtimeDisconnected()
         {
+            if (onlineMatchResultReceived)
+            {
+                realtimeStatus = "Match complete";
+                return;
+            }
             realtimeStatus = onlineMatch ? "Online connection lost · reconnecting" : "Offline";
             ShowMatchAccessibility();
         }

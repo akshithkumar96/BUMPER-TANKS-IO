@@ -134,7 +134,7 @@ public sealed class RealtimeMatchHub : IDisposable
                                 error = "rooms_full";
                                 break;
                             }
-                            room = new RealtimeRoom(Guid.NewGuid().ToString("N"), profiles, gameplayTuning);
+                            room = new RealtimeRoom(Guid.NewGuid().ToString("N"), profiles, gameplayTuning, RetireFinishedRoom);
                             rooms.Add(room.RoomId, room);
                         }
 
@@ -209,8 +209,17 @@ public sealed class RealtimeMatchHub : IDisposable
         lock (gate)
         {
             if (!room.ExpireDisconnectedPlayer(playerId, externalId, disconnectGrace)) return;
-            if (room.IsEmpty && rooms.Remove(room.RoomId)) room.Dispose();
+            if (room.IsEmpty)
+            {
+                rooms.Remove(room.RoomId);
+                room.Dispose();
+            }
         }
+    }
+
+    private void RetireFinishedRoom(string roomId)
+    {
+        lock (gate) rooms.Remove(roomId);
     }
 
     private static bool TryParseJoin(string frame, IPlayerIdentityRepository identities, out string playerId, out string displayName, out string archetype, out string error)
@@ -337,6 +346,7 @@ public sealed class RealtimeMatchHub : IDisposable
         private readonly Dictionary<string, RealtimePlayer> realParticipants = new(StringComparer.Ordinal);
         private readonly IProfileRepository profiles;
         private readonly GameplayTuningSettings gameplayTuning;
+        private readonly Action<string> retireFinishedRoom;
         private readonly List<RealtimeShotSegment> shotSegments = new();
         private readonly List<RealtimeGemPickup> gems = new();
         private readonly List<RealtimePowerUpPickup> powerUps = new();
@@ -354,11 +364,13 @@ public sealed class RealtimeMatchHub : IDisposable
         private long matchStartedTimestamp;
         private bool disposed;
 
-        public RealtimeRoom(string roomId, IProfileRepository profiles, GameplayTuningSettings gameplayTuning)
+        public RealtimeRoom(string roomId, IProfileRepository profiles, GameplayTuningSettings gameplayTuning,
+            Action<string> retireFinishedRoom)
         {
             RoomId = roomId;
             this.profiles = profiles;
             this.gameplayTuning = gameplayTuning;
+            this.retireFinishedRoom = retireFinishedRoom;
             var seed = StableSeed(roomId);
             var jitter = new WireVector(((int)(seed % 5) - 2) * 0.1f, ((int)((seed / 5) % 5) - 2) * 0.1f);
             WireVector Place(float x, float y) => new(x + jitter.X, y + jitter.Y);
@@ -635,6 +647,11 @@ public sealed class RealtimeMatchHub : IDisposable
                         await Task.WhenAll(recipients.Select(connection => SendSnapshotSafelyAsync(connection, snapshot, token)));
                     if (matchReceipts.Count > 0)
                         await Task.WhenAll(matchReceipts.Select(receipt => SendMatchReceiptSafelyAsync(receipt.Connection, receipt.Receipt, token)));
+                    if (finished)
+                    {
+                        retireFinishedRoom(RoomId);
+                        return;
+                    }
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)

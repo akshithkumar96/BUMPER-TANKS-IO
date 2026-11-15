@@ -301,6 +301,7 @@ namespace BumperTanks.Network
                     if (!RealtimeMessageCodec.TryReadMatchReceipt(json, out var receipt))
                         throw new FormatException("Match result is missing valid server reward data.");
                     MatchReceiptReceived?.Invoke(receipt);
+                    Disconnect();
                     break;
                 }
                 case "error":

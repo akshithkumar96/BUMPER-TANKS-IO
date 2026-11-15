@@ -1,5 +1,6 @@
 using BumperTanks.Network;
 using NUnit.Framework;
+using System.Reflection;
 using UnityEngine;
 
 namespace BumperTanks.Network.Tests
@@ -68,6 +69,38 @@ namespace BumperTanks.Network.Tests
             var mismatchedProfile = json.Replace("\"profile\":{\"playerId\":\"" + playerId,
                 "\"profile\":{\"playerId\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
             Assert.That(RealtimeMessageCodec.TryReadMatchReceipt(mismatchedProfile, out _), Is.False);
+        }
+
+        [Test]
+        public void MatchReceiptDisconnectsWithoutSchedulingReconnect()
+        {
+            const string playerId = "0123456789abcdef0123456789abcdef";
+            const string json = "{\"type\":\"match_result\",\"matchId\":\"fedcba9876543210fedcba9876543210\",\"playerId\":\"" + playerId + "\",\"gems\":4,\"eliminations\":2,\"award\":24,\"profile\":{\"playerId\":\"" + playerId + "\",\"battleCoins\":124,\"matchesPlayed\":1,\"ownedCosmetics\":[]}}";
+            var gameObject = new GameObject("Realtime session test");
+            var session = gameObject.AddComponent<WebSocketRealtimeSession>();
+            var receiptCount = 0;
+            var disconnectCount = 0;
+            try
+            {
+                typeof(WebSocketRealtimeSession).GetProperty(nameof(WebSocketRealtimeSession.IsConnected))
+                    .SetValue(session, true);
+                session.MatchReceiptReceived += _ => receiptCount++;
+                session.Disconnected += () => disconnectCount++;
+
+                typeof(WebSocketRealtimeSession).GetMethod("ProcessServerMessage", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(session, new object[] { json });
+
+                var explicitDisconnect = (bool)typeof(WebSocketRealtimeSession)
+                    .GetField("explicitDisconnect", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(session);
+                Assert.That(receiptCount, Is.EqualTo(1));
+                Assert.That(disconnectCount, Is.EqualTo(1));
+                Assert.That(session.IsConnected, Is.False);
+                Assert.That(explicitDisconnect, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
         }
 
         [Test]
