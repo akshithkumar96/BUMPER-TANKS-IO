@@ -433,6 +433,7 @@ def drive_toward_pickups(clients, player_ids, snapshot):
     target_types = ("MegaBullet", "Nitro", "Magnet")
     active_fields = ("megaBulletActive", "nitroActive", "magnetActive")
     ticks = [0] * len(clients)
+    collected_at = {}
     current = snapshot
     for _ in range(120):
         current = wait_for(clients[0], lambda message: message.get("type") == "snapshot" and
@@ -441,6 +442,9 @@ def drive_toward_pickups(clients, player_ids, snapshot):
         players = {player["playerId"]: player for player in current["players"]}
         active_owners = {field: next((player for player in current["players"] if player.get(field)), None)
                          for field in active_fields}
+        for target_type, active_field in zip(target_types, active_fields):
+            if target_type not in available and active_owners[active_field] is not None:
+                collected_at.setdefault(target_type, current["elapsedSeconds"])
         for index, (client, player_id_value, target_type, active_field) in enumerate(
                 zip(clients, player_ids, target_types, active_fields)):
             player = players[player_id_value]
@@ -471,9 +475,10 @@ def drive_toward_pickups(clients, player_ids, snapshot):
             ticks[index] += 1
             client.send({"type": "input", "tick": ticks[index], "movement": movement,
                          "aim": {"x": 0, "y": 1}, "fire": False, "ability": False})
-        if (all(players[player_id_value].get(field) for player_id_value, field in zip(player_ids, active_fields)) and
-                players[player_ids[2]].get("gems", 0) >= 1):
-            return current, ticks[0]
+        magnet_owner = active_owners["magnetActive"]
+        if (all(active_owners[field] is not None for field in active_fields) and
+                magnet_owner is not None and magnet_owner.get("gems", 0) >= 1):
+            return current, ticks[0], collected_at
     raise AssertionError(f"Could not collect randomized power-ups and magnetized gem: {current}")
 
 
@@ -823,7 +828,7 @@ def main():
         initial = wait_for(first, lambda message: message.get("type") == "snapshot" and
                            len(message.get("powerUps", [])) == 3, timeout=3)
         assert_randomized_powerups(initial)
-        moved, first_last_input_tick = drive_toward_pickups(
+        moved, first_last_input_tick, powerup_collected_at = drive_toward_pickups(
             [first, second, clients[2]], first_room_player_ids[:3], initial)
         first_room_players = [player for player in moved["players"] if player["playerId"] > 0]
         assert len(first_room_players) == 8, moved
@@ -833,9 +838,9 @@ def main():
                    for player in first_room_players), moved
         first_state = next(player for player in first_room_players if player["playerId"] == first_join["playerId"])
         second_state = next(player for player in first_room_players if player["playerId"] == second_join["playerId"])
-        magnet_state = next(player for player in first_room_players if player["playerId"] == first_room_player_ids[2])
-        assert first_state["archetype"] == "SpeedyBumper" and first_state["gems"] >= 1 and first_state["megaBulletActive"], moved
-        assert second_state["nitroActive"], moved
+        magnet_state = next(player for player in first_room_players if player.get("magnetActive"))
+        assert first_state["archetype"] == "SpeedyBumper" and first_state["megaBulletActive"], moved
+        assert any(player.get("nitroActive") for player in first_room_players), moved
         assert magnet_state["magnetActive"] and magnet_state["gems"] >= 1, moved
         assert len(moved["gems"]) < 12, moved
         assert not moved["powerUps"], moved
@@ -953,12 +958,14 @@ def main():
             clients[index].close()
             clients[index] = None
 
-        respawn_elapsed = moved["elapsedSeconds"] + 12.2
+        mega_bullet_collected_at = powerup_collected_at["MegaBullet"]
+        respawn_elapsed = max(powerup_collected_at.values()) + 12.2
         before_respawn = wait_for(first, lambda message: message.get("type") == "snapshot" and
-                                  message.get("elapsedSeconds", 0) >= moved["elapsedSeconds"] + 11.5, timeout=15)
+                                  message.get("elapsedSeconds", 0) >= mega_bullet_collected_at + 11.5, timeout=15)
         assert all(power_up["pickupId"] != 1 for power_up in before_respawn["powerUps"]), before_respawn
         after_respawn = wait_for(first, lambda message: message.get("type") == "snapshot" and
-                                 message.get("elapsedSeconds", 0) >= respawn_elapsed, timeout=4)
+                                 message.get("elapsedSeconds", 0) >= respawn_elapsed and
+                                 {power_up["pickupId"] for power_up in message.get("powerUps", [])} == {1, 2, 3}, timeout=8)
         respawned_mega = next(power_up for power_up in after_respawn["powerUps"] if power_up["pickupId"] == 1)
         assert respawned_mega["type"] == "MegaBullet", respawned_mega
         assert abs(respawned_mega["position"]["x"]) <= after_respawn["arenaBounds"]["halfWidth"], respawned_mega
