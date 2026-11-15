@@ -5,11 +5,13 @@ on:
     paths:
       - 'Server/**'
       - 'Tests/PostgresStorageIntegrationSmoke/**'
+      - 'docker-compose.yml'
       - '.github/workflows/server-ci.yml'
   pull_request:
     paths:
       - 'Server/**'
       - 'Tests/PostgresStorageIntegrationSmoke/**'
+      - 'docker-compose.yml'
       - '.github/workflows/server-ci.yml'
 
 jobs:
@@ -38,6 +40,19 @@ jobs:
         working-directory: Server
     steps:
       - uses: actions/checkout@v4
+      - name: Verify Docker Compose reward-secret forwarding
+        working-directory: .
+        env:
+          BUMPER_POSTGRES_PASSWORD: ci-compose-password
+          BUMPER_LEVELPLAY_PRIVATE_KEY: ci-levelplay-key
+          BUMPER_MATCH_ATTESTATION_SECRET: ci-match-attestation-secret
+          BUMPER_REQUIRE_MATCH_ATTESTATION: 'true'
+        run: |
+          docker compose config --format json | jq -e '
+            .services.service.environment["Rewards__LevelPlayPrivateKey"] == "ci-levelplay-key" and
+            .services.service.environment["Rewards__MatchAttestationSecret"] == "ci-match-attestation-secret" and
+            .services.service.environment["Rewards__RequireMatchAttestation"] == "true"
+          ' > /dev/null
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
