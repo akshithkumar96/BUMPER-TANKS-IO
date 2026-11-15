@@ -64,6 +64,10 @@ var matchClaims = await ParallelResults(20, index =>
 });
 if (matchClaims.Count(success => success) != 1)
     throw new InvalidOperationException($"Expected one idempotent match award; got {matchClaims.Count(success => success)}.");
+var recoverableMatch = second.Profiles.GetCompletedMatch(playerId, matchId);
+if (recoverableMatch is null || recoverableMatch.Award != 17 || recoverableMatch.Profile.PlayerId != playerId ||
+    first.Profiles.GetCompletedMatch(Guid.NewGuid().ToString("N"), matchId) is not null)
+    throw new InvalidOperationException("PostgreSQL match result recovery did not preserve owner, award, and profile.");
 var baseMatchProfile = second.Profiles.GetOrCreate(playerId);
 var matchBonusChallenge = first.Profiles.CreateMatchBonusChallenge(playerId, matchId);
 if (matchBonusChallenge.Award != 17 || second.Profiles.CreateMatchBonusChallenge(playerId, matchId).ChallengeId != matchBonusChallenge.ChallengeId)

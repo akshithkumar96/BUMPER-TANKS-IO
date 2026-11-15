@@ -207,6 +207,7 @@ public sealed class ProfileRepository : IProfileRepository
     {
         lock (writeLock)
         {
+            var hadProfile = profiles.TryGetValue(playerId, out var previousProfile);
             var current = GetOrCreate(playerId);
             var key = $"{playerId}:{matchId}";
             if (!completedMatches.Add(key))
@@ -223,8 +224,30 @@ public sealed class ProfileRepository : IProfileRepository
                 MatchesPlayed = current.MatchesPlayed == int.MaxValue ? int.MaxValue : current.MatchesPlayed + 1
             };
             profiles[playerId] = updated;
-            PersistLocked();
+            try
+            {
+                PersistLocked();
+            }
+            catch
+            {
+                if (hadProfile) profiles[playerId] = previousProfile!;
+                else profiles.TryRemove(playerId, out _);
+                completedMatches.Remove(key);
+                completedMatchAwards.Remove(key);
+                throw;
+            }
             return true;
+        }
+    }
+
+    public CompletedMatchResult? GetCompletedMatch(string playerId, string matchId)
+    {
+        lock (writeLock)
+        {
+            var key = MatchKey(playerId, matchId);
+            if (!completedMatches.Contains(key) || !profiles.TryGetValue(playerId, out var profile)) return null;
+            completedMatchAwards.TryGetValue(key, out var award);
+            return new CompletedMatchResult(profile, award);
         }
     }
 

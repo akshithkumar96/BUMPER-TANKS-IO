@@ -1,5 +1,38 @@
 using Microsoft.Extensions.Configuration;
 
+var retryStoreDirectory = Path.Combine(Path.GetTempPath(), "bumper-match-persist-retry", Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(retryStoreDirectory);
+try
+{
+    var retryProfilePath = Path.Combine(retryStoreDirectory, "profiles.json");
+    var retryConfiguration = new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?> { ["Storage:ProfilePath"] = retryProfilePath })
+        .Build();
+    var retryRepository = new ProfileRepository(retryConfiguration);
+    var retryPlayerId = Guid.NewGuid().ToString("N");
+    retryRepository.Save(new PlayerProfile(retryPlayerId, 99, 2, DateOnly.MinValue));
+    var retryMatchId = Guid.NewGuid().ToString("N");
+    Directory.CreateDirectory(retryProfilePath + ".tmp");
+    try
+    {
+        retryRepository.TryCompleteMatch(retryPlayerId, retryMatchId, 10, 1, out _, out _);
+        throw new InvalidOperationException("A match reward survived an intentionally failed JSON write.");
+    }
+    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+    if (retryRepository.GetCompletedMatch(retryPlayerId, retryMatchId) is not null ||
+        retryRepository.GetOrCreate(retryPlayerId).BattleCoins != 99 || retryRepository.GetOrCreate(retryPlayerId).MatchesPlayed != 2)
+        throw new InvalidOperationException("A failed JSON write left an in-memory match reward marked complete.");
+    Directory.Delete(retryProfilePath + ".tmp");
+    if (!retryRepository.TryCompleteMatch(retryPlayerId, retryMatchId, 10, 1, out var retriedProfile, out var retriedAward) ||
+        retriedAward != 20 || retriedProfile.BattleCoins != 119 ||
+        retryRepository.GetCompletedMatch(retryPlayerId, retryMatchId)?.Award != retriedAward)
+        throw new InvalidOperationException("The JSON match reward did not commit after the temporary storage failure was removed.");
+}
+finally
+{
+    Directory.Delete(retryStoreDirectory, recursive: true);
+}
+
 var profilePath = Path.Combine(Path.GetTempPath(), "bumper-ad-reward-smoke", Guid.NewGuid().ToString("N"), "profiles.json");
 var configuration = new ConfigurationBuilder()
     .AddInMemoryCollection(new Dictionary<string, string?> { ["Storage:ProfilePath"] = profilePath })
@@ -37,6 +70,10 @@ catch (InvalidOperationException exception) when (exception.Message.Contains("no
 
 if (!repository.TryCompleteMatch(playerId, matchId, gems: 12, eliminations: 1, out var matchProfile, out var matchAward) || matchAward != 22)
     throw new InvalidOperationException("The base match reward was not finalized as expected.");
+var recoverableMatch = repository.GetCompletedMatch(playerId, matchId);
+if (recoverableMatch is null || recoverableMatch.Award != matchAward || recoverableMatch.Profile.BattleCoins != matchProfile.BattleCoins ||
+    repository.GetCompletedMatch(Guid.NewGuid().ToString("N"), matchId) is not null)
+    throw new InvalidOperationException("A finalized match result was not recoverable only by its owner.");
 var matchChallenge = repository.CreateMatchBonusChallenge(playerId, matchId);
 if (!matchChallenge.ChallengeId.StartsWith("mb", StringComparison.Ordinal) || matchChallenge.ChallengeId.Length != 32 || matchChallenge.Award != matchAward)
     throw new InvalidOperationException("The match bonus challenge was not bound to the finalized match reward.");
@@ -77,5 +114,9 @@ if (!restartedWithMatchBonus.TryCompleteMatchBonus(matchChallenge.ChallengeId, "
         out var persistedMatchProfile, out var persistedMatchAward, out var persistedMatchDuplicate) || !persistedMatchDuplicate ||
     persistedMatchAward != matchAward || persistedMatchProfile.BattleCoins != doubledProfile.BattleCoins)
     throw new InvalidOperationException("A persisted match bonus callback was not acknowledged idempotently.");
+var persistedMatchResult = restartedWithMatchBonus.GetCompletedMatch(playerId, matchId);
+if (persistedMatchResult is null || persistedMatchResult.Award != matchAward ||
+    persistedMatchResult.Profile.BattleCoins != doubledProfile.BattleCoins)
+    throw new InvalidOperationException("A finalized match result could not be recovered after repository restart.");
 
-Console.WriteLine("Daily-spin isolation, match reward binding, one-time doubled payout, and callback replay persistence verified");
+Console.WriteLine("Daily-spin isolation, match reward binding and recovery, one-time doubled payout, and callback replay persistence verified");

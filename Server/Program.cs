@@ -101,6 +101,16 @@ app.MapGet("/v1/profiles/{playerId}", (string playerId, HttpRequest request) =>
     return Results.Ok(profiles.GetOrCreate(playerId));
 }).RequireRateLimiting("rewards");
 
+app.MapGet("/v1/matches/{matchId}/result", (string matchId, HttpRequest request) =>
+{
+    if (!TryGetAuthenticatedPlayer(identities, request, out var authenticatedPlayerId)) return Results.Unauthorized();
+    if (!RequestValidation.IsMatchId(matchId)) return Results.BadRequest(new { error = "invalid matchId" });
+    var result = profiles.GetCompletedMatch(authenticatedPlayerId, matchId);
+    return result is null
+        ? Results.NotFound()
+        : Results.Ok(new CompletedMatchResponse(matchId, authenticatedPlayerId, result.Award, result.Profile));
+}).RequireRateLimiting("rewards");
+
 app.MapPost("/v1/rewards/daily", (DailyRewardRequest request, HttpRequest httpRequest) =>
 {
     if (!TryGetAuthenticatedPlayer(identities, httpRequest, out var authenticatedPlayerId)) return Results.Unauthorized();
@@ -286,6 +296,7 @@ public sealed record CosmeticPurchaseRequest(string PlayerId, string CosmeticId)
 public sealed record CosmeticPurchaseResponse(PlayerProfile Profile, string CosmeticId);
 public sealed record CosmeticCatalogResponse(CosmeticDefinition[] Items);
 public sealed record MatchCompleteRequest(string PlayerId, string MatchId, int Gems, int Eliminations);
+public sealed record CompletedMatchResponse(string MatchId, string PlayerId, int Award, PlayerProfile Profile);
 public sealed record TelemetryRequest(string PlayerId, string Name);
 public sealed record CrashReportRequest(string PlayerId, string Fingerprint, string BuildVersion, string Platform);
 public sealed record LeaderboardResponse(PlayerProfile[] Entries);

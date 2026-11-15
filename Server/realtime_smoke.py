@@ -11,6 +11,7 @@ import struct
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 
 
@@ -140,6 +141,14 @@ def create_identity(address):
     assert len(identity["playerId"]) == 32, identity
     assert len(identity["accessToken"]) == 64, identity
     return identity
+
+
+def get_completed_match(address, match_id, token=None):
+    request = urllib.request.Request(f"http://{address}/v1/matches/{match_id}/result")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def join(address, index, origin=None, archetype=None):
@@ -943,6 +952,22 @@ def main():
         assert receipt["award"] == expected_award, receipt
         assert receipt["profile"]["matchesPlayed"] == 1, receipt
         assert receipt["profile"]["battleCoins"] == expected_award, receipt
+        recovered_result = get_completed_match(address, first_join["roomId"], first._identity_access_token)
+        assert recovered_result["matchId"] == first_join["roomId"], recovered_result
+        assert recovered_result["playerId"] == first_join["_externalPlayerId"], recovered_result
+        assert recovered_result["award"] == expected_award, recovered_result
+        assert recovered_result["profile"]["battleCoins"] == expected_award, recovered_result
+        try:
+            get_completed_match(address, first_join["roomId"])
+            raise AssertionError("Match result recovery allowed an unauthenticated request")
+        except urllib.error.HTTPError as error:
+            assert error.code == 401, error
+        other_identity = create_identity(address)
+        try:
+            get_completed_match(address, first_join["roomId"], other_identity["accessToken"])
+            raise AssertionError("Match result recovery exposed another player's result")
+        except urllib.error.HTTPError as error:
+            assert error.code == 404, error
         terminal_deadline = time.monotonic() + 0.35
         while time.monotonic() < terminal_deadline:
             try:
@@ -952,7 +977,7 @@ def main():
             assert message.get("type") != "match_result", message
             assert message.get("type") != "snapshot", message
 
-        print("Realtime WebSocket smoke passed: pre-join timeout, authenticated identity/matchmaking, 8-player cap, 30 Hz snapshots, server gem/power-up collection, Nitro/Mega-Bullet/Magnet effects, 12-second respawn, doubled sudden-death gems, authoritative combat, idempotent server-issued match reward receipt, terminal match-loop stop, boundary steps, bots, disconnect, and invalid-input rejection.")
+        print("Realtime WebSocket smoke passed: pre-join timeout, authenticated identity/matchmaking, 8-player cap, 30 Hz snapshots, server gem/power-up collection, Nitro/Mega-Bullet/Magnet effects, 12-second respawn, doubled sudden-death gems, authoritative combat, idempotent match reward receipt and authenticated result recovery, terminal match-loop stop, boundary steps, bots, disconnect, and invalid-input rejection.")
     finally:
         for client in clients:
             if client is not None:

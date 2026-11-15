@@ -272,6 +272,15 @@ public sealed class PostgresProfileRepository(DbContextOptions<GameStorageContex
         return result.Success;
     }
 
+    public CompletedMatchResult? GetCompletedMatch(string playerId, string matchId)
+    {
+        using var db = new GameStorageContext(options);
+        var completed = db.CompletedMatches.AsNoTracking().SingleOrDefault(item => item.PlayerId == playerId && item.MatchId == matchId);
+        if (completed is null) return null;
+        var profile = db.Profiles.AsNoTracking().SingleOrDefault(item => item.PlayerId == playerId);
+        return profile is null ? null : new CompletedMatchResult(ToProfile(profile), completed.Award);
+    }
+
     public bool TryPurchaseCosmetic(string playerId, string cosmeticId, out PlayerProfile updated, out string error)
     {
         var result = InPlayerTransaction(playerId, (db, current) =>

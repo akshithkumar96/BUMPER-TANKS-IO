@@ -186,6 +186,23 @@ namespace BumperTanks.Frontend
             }, onError));
         }
 
+        public void RecoverCompletedMatch(string matchId, Action<CompletedMatchRecovery> onSuccess, Action<string> onError = null)
+        {
+            if (string.IsNullOrWhiteSpace(matchId)) { onError?.Invoke("Match ID is unavailable."); return; }
+            var path = "/v1/matches/" + UnityWebRequest.EscapeURL(matchId) + "/result";
+            StartCoroutine(GetJson(path, response =>
+            {
+                var result = JsonUtility.FromJson<CompletedMatchRecovery>(response);
+                if (result == null || result.profile == null || string.IsNullOrWhiteSpace(result.playerId) ||
+                    !string.Equals(result.profile.playerId, result.playerId, StringComparison.Ordinal))
+                {
+                    onError?.Invoke("Match result response was invalid.");
+                    return;
+                }
+                onSuccess?.Invoke(result);
+            }, onError));
+        }
+
         public void ClaimDailyReward(string playerId, Action<int> onSuccess = null, Action<string> onError = null)
         {
             StartCoroutine(PostJsonResponse("/v1/rewards/daily", JsonUtility.ToJson(new DailyReward(playerId)), response =>
@@ -388,6 +405,7 @@ namespace BumperTanks.Frontend
         {
             if (!EndpointConfigurationValid) { onError?.Invoke(EndpointConfigurationError); yield break; }
             using var request = UnityWebRequest.Get(ApiBaseUrl + path);
+            request.timeout = 10;
             if (!string.IsNullOrEmpty(ProfileStore.GetAccessToken())) request.SetRequestHeader("Authorization", "Bearer " + ProfileStore.GetAccessToken());
             yield return request.SendWebRequest();
             if (request.result != UnityWebRequest.Result.Success) onError?.Invoke(request.error);
@@ -453,7 +471,16 @@ namespace BumperTanks.Frontend
         [Serializable] private sealed class AdSpinStatusResponse { public bool completed; public int award; public ServerProfile profile; }
 
         [Serializable]
-        public sealed class ServerProfile { public int battleCoins; public string[] ownedCosmetics; }
+        public sealed class CompletedMatchRecovery
+        {
+            public string matchId;
+            public string playerId;
+            public int award;
+            public ServerProfile profile;
+        }
+
+        [Serializable]
+        public sealed class ServerProfile { public string playerId; public int battleCoins; public string[] ownedCosmetics; }
         [Serializable]
         public sealed class CosmeticEntry { public string id; public string category; public int price; }
         [Serializable]

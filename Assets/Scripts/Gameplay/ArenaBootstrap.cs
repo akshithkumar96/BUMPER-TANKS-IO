@@ -52,6 +52,8 @@ namespace BumperTanks.Gameplay
         private string onlinePhase = string.Empty;
         private bool onlineMatch;
         private bool onlineMatchResultReceived;
+        private Coroutine matchResultRecovery;
+        private string resultRecoveryMatchId = string.Empty;
         private bool showFrontMenu = true;
         private bool showDevelopmentServerSettings;
         private string developmentApiDraft = string.Empty;
@@ -521,6 +523,14 @@ namespace BumperTanks.Gameplay
 
         private void OnRealtimeRoomJoined(RealtimeRoomJoined room)
         {
+            if (matchResultRecovery != null) StopCoroutine(matchResultRecovery);
+            matchResultRecovery = null;
+            resultRecoveryMatchId = string.Empty;
+            onlineMatchId = room.RoomId;
+            onlineMatchBonusAward = 0;
+            onlineMatchBonusPending = false;
+            onlineMatchBonusClaimed = false;
+            onlineMatchBonusMessage = string.Empty;
             onlinePlayerId = room.PlayerId;
             inputTick = -1;
             inputSendCadence.Reset();
@@ -575,6 +585,8 @@ namespace BumperTanks.Gameplay
                 if (onlineMatch && match != null && !string.IsNullOrEmpty(snapshot.Phase))
                     match.ApplyRealtimeState(snapshot.ElapsedSeconds, snapshot.ArenaSize);
             }
+            if (onlineMatch && string.Equals(snapshot.Phase, "finished", StringComparison.Ordinal) && !onlineMatchResultReceived)
+                BeginMatchResultRecovery(onlineMatchId);
             if (snapshot.Alive) aliveOnlinePlayers.Add(snapshot.PlayerId);
             else aliveOnlinePlayers.Remove(snapshot.PlayerId);
             if (snapshot.PlayerId == onlinePlayerId)
@@ -662,7 +674,50 @@ namespace BumperTanks.Gameplay
             GameServiceClient.Instance?.ApplyServerProfile(receipt.profile.battleCoins, receipt.profile.ownedCosmetics);
             onlineMatchAward = receipt.award;
             onlineMatchResultReceived = true;
+            if (matchResultRecovery != null) StopCoroutine(matchResultRecovery);
+            matchResultRecovery = null;
             ShowResultAccessibility();
+        }
+
+        private void BeginMatchResultRecovery(string matchId)
+        {
+            if (onlineMatchResultReceived || string.IsNullOrWhiteSpace(matchId) || matchResultRecovery != null) return;
+            resultRecoveryMatchId = matchId;
+            matchResultRecovery = StartCoroutine(RecoverCompletedMatch(matchId));
+        }
+
+        private System.Collections.IEnumerator RecoverCompletedMatch(string matchId)
+        {
+            var delays = new[] { 0.5f, 1f, 2f, 5f, 10f, 15f, 20f, 30f, 30f };
+            foreach (var delay in delays)
+            {
+                yield return new WaitForSecondsRealtime(delay);
+                if (onlineMatchResultReceived || !string.Equals(onlineMatchId, matchId, StringComparison.Ordinal)) break;
+                var service = GameServiceClient.Instance;
+                if (service == null) continue;
+                var requestCompleted = false;
+                service.RecoverCompletedMatch(matchId, result =>
+                {
+                    requestCompleted = true;
+                    if (onlineMatchResultReceived || !onlineMatch || result == null ||
+                        !string.Equals(onlineMatchId, matchId, StringComparison.Ordinal) ||
+                        !string.Equals(result.matchId, matchId, StringComparison.Ordinal) ||
+                        !string.Equals(result.playerId, ProfileStore.GetServerPlayerId(), StringComparison.Ordinal)) return;
+                    service.ApplyServerProfile(result.profile.battleCoins, result.profile.ownedCosmetics);
+                    onlineMatchAward = result.award;
+                    onlineMatchResultReceived = true;
+                    onlinePhase = "finished";
+                    realtimeStatus = "Match complete · result recovered";
+                    ShowResultAccessibility();
+                }, _ => requestCompleted = true);
+                while (!requestCompleted) yield return null;
+                if (onlineMatchResultReceived) break;
+            }
+            if (string.Equals(resultRecoveryMatchId, matchId, StringComparison.Ordinal))
+            {
+                resultRecoveryMatchId = string.Empty;
+                matchResultRecovery = null;
+            }
         }
 
         private bool CanOfferMatchBonus()
@@ -833,6 +888,7 @@ namespace BumperTanks.Gameplay
                 realtimeStatus = "Match complete";
                 return;
             }
+            if (onlineMatch) BeginMatchResultRecovery(onlineMatchId);
             realtimeStatus = onlineMatch ? "Online connection lost · reconnecting" : "Offline";
             ShowMatchAccessibility();
         }

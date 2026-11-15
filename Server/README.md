@@ -2,7 +2,9 @@
 
 Run the PostgreSQL-backed local stack from the repository root with `docker compose up --build`. For JSON-backed Development mode, set `ASPNETCORE_ENVIRONMENT=Development` and run `dotnet run --project Server/BumperTanks.Server.csproj`.
 
-Endpoints: `GET /health`, `GET /v1/gameplay/tuning`, `POST /v1/identity/anonymous`, `GET /v1/profiles/{playerId}`, `POST /v1/rewards/daily`, `POST /v1/rewards/ad/challenge`, `GET /v1/rewards/ad/status/{challengeId}`, `POST /v1/rewards/ad/match/challenge`, `GET /v1/rewards/ad/match/status/{challengeId}`, `GET /v1/rewards/ad/levelplay-callback`, `GET /v1/cosmetics`, `POST /v1/cosmetics/purchase`, `POST /v1/matches/complete`, `POST /v1/telemetry`, `POST /v1/crash-reports`, `GET /v1/leaderboard`, and WebSocket `/v1/realtime`.
+Endpoints: `GET /health`, `GET /v1/gameplay/tuning`, `POST /v1/identity/anonymous`, `GET /v1/profiles/{playerId}`, `POST /v1/rewards/daily`, `POST /v1/rewards/ad/challenge`, `GET /v1/rewards/ad/status/{challengeId}`, `POST /v1/rewards/ad/match/challenge`, `GET /v1/rewards/ad/match/status/{challengeId}`, `GET /v1/rewards/ad/levelplay-callback`, `GET /v1/cosmetics`, `POST /v1/cosmetics/purchase`, `POST /v1/matches/complete`, `GET /v1/matches/{matchId}/result`, `POST /v1/telemetry`, `POST /v1/crash-reports`, `GET /v1/leaderboard`, and WebSocket `/v1/realtime`.
+
+`GET /v1/matches/{matchId}/result` requires the bearer token for the match's player and returns the finalized award plus current profile. It returns `404` when the match has not been completed or belongs to another player. The Unity client polls this endpoint after a realtime disconnect so a persisted result can restore the reward screen if the WebSocket receipt was lost.
 
 Remote gameplay tuning is configured through bounded `GameplayTuning__*` environment variables. The public endpoint uses ETags, and Unity caches valid values for seven days. See [remote gameplay tuning](../docs/remote-gameplay-tuning.md).
 

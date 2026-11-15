@@ -19,8 +19,11 @@ public interface IProfileRepository
     void Save(PlayerProfile profile);
     bool TryClaimDailyReward(string playerId, DateOnly today, out PlayerProfile updated, out int reward);
     bool TryCompleteMatch(string playerId, string matchId, int gems, int eliminations, out PlayerProfile updated, out int award);
+    CompletedMatchResult? GetCompletedMatch(string playerId, string matchId);
     bool TryPurchaseCosmetic(string playerId, string cosmeticId, out PlayerProfile updated, out string error);
 }
+
+public sealed record CompletedMatchResult(PlayerProfile Profile, int Award);
 
 public interface ITelemetryRepository
 {
