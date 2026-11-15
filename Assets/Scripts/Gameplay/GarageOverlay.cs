@@ -17,7 +17,7 @@ namespace BumperTanks.Gameplay
         private readonly OverlayLoadState cosmeticCatalogLoad = new();
         private int page;
         private const float PanelWidth = 218f;
-        private const float PanelHeight = 384f;
+        private const float PanelHeight = 408f;
         private static readonly string[] ColorOptions = { "sky", "coral", "lime" };
         private static readonly string[] TrailOptions = { "none", "neon", "gold" };
 
@@ -81,7 +81,7 @@ namespace BumperTanks.Gameplay
                 {
                     GUI.Label(SafeFrame(left + 10, top + 278, controlWidth, 22, safe), catalogStatus);
                     if (cosmeticCatalogLoad.Status == OverlayLoadStatus.Failed &&
-                        GUI.Button(SafeFrame(left + 10, top + 300, controlWidth, 28, safe), "Retry catalog"))
+                        GUI.Button(SafeFrame(left + 10, top + 306, controlWidth, 44, safe), "Retry catalog"))
                         LoadCosmeticCatalog();
                 }
                 else if (!string.IsNullOrEmpty(cosmeticsMessage))
@@ -101,7 +101,7 @@ namespace BumperTanks.Gameplay
                 if (!string.IsNullOrEmpty(dailyRewardMessage)) GUI.Label(SafeFrame(left + 10, top + 118, controlWidth, 38, safe), dailyRewardMessage);
             }
 
-            var footerY = top + 332f;
+            var footerY = top + 356f;
             if (GUI.Button(SafeFrame(left + 10, footerY, 44, 44, safe), "Prev")) PreviousPage();
             if (GUI.Button(SafeFrame(left + 64, footerY, 90, 44, safe), "Main Menu")) ReturnToMenu();
             if (GUI.Button(SafeFrame(left + 164, footerY, 44, 44, safe), "Next")) NextPage();
@@ -131,7 +131,7 @@ namespace BumperTanks.Gameplay
                 actions.Add(new AccessibleUiAction($"Bump sound, currently {SoundName(profile.BumpSoundId)}", "Activate to cycle through unlocked bump sounds.", SafeFrame(left + 10, top + 188, width, 44, safe), CycleSound, cosmeticCatalogLoad.HasCompleted));
                 actions.Add(UnlockAction(left + 10, top + 236, width, safe, "sound"));
                 if (cosmeticCatalogLoad.Status == OverlayLoadStatus.Failed)
-                    actions.Add(new AccessibleUiAction("Retry cosmetic catalog", "Try loading available flags and bump sounds again.", SafeFrame(left + 10, top + 278, width, 44, safe), LoadCosmeticCatalog));
+                    actions.Add(new AccessibleUiAction("Retry cosmetic catalog", "Try loading available flags and bump sounds again.", SafeFrame(left + 10, top + 306, width, 44, safe), LoadCosmeticCatalog));
             }
             else
             {
@@ -139,9 +139,9 @@ namespace BumperTanks.Gameplay
                 if (GameServiceClient.Instance != null && GameServiceClient.Instance.CanWatchAdBonusSpin)
                     actions.Add(new AccessibleUiAction(dailyRewardPending ? "Rewarded video pending" : "Watch a video for a bonus spin", "Coins are added only after the server verifies the ad network callback.", SafeFrame(left + 10, top + 166, width, 44, safe), RequestAdBonusSpin));
             }
-            actions.Add(new AccessibleUiAction("Previous garage page", "Show the previous garage category.", SafeFrame(left + 10, top + 332, 44, 44, safe), PreviousPage));
-            actions.Add(new AccessibleUiAction("Back to main menu", "Close the garage and return to the main menu.", SafeFrame(left + 64, top + 332, 90, 44, safe), ReturnToMenu));
-            actions.Add(new AccessibleUiAction("Next garage page", "Show the next garage category.", SafeFrame(left + 164, top + 332, 44, 44, safe), NextPage));
+            actions.Add(new AccessibleUiAction("Previous garage page", "Show the previous garage category.", SafeFrame(left + 10, top + 356, 44, 44, safe), PreviousPage));
+            actions.Add(new AccessibleUiAction("Back to main menu", "Close the garage and return to the main menu.", SafeFrame(left + 64, top + 356, 90, 44, safe), ReturnToMenu));
+            actions.Add(new AccessibleUiAction("Next garage page", "Show the next garage category.", SafeFrame(left + 164, top + 356, 44, 44, safe), NextPage));
             var loadAnnouncement = page == 1 ? CosmeticCatalogStatusText() : string.Empty;
             AccessibleUiBridge.Instance?.ShowScreen($"Garage. {PageName(page)}." +
                 (string.IsNullOrEmpty(loadAnnouncement) ? string.Empty : $" {loadAnnouncement}"), actions.ToArray());
