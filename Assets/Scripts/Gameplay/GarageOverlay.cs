@@ -14,6 +14,7 @@ namespace BumperTanks.Gameplay
         private string cosmeticsMessage = string.Empty;
         private bool cosmeticPurchasePending;
         private GameServiceClient.CosmeticEntry[] cosmeticCatalog = System.Array.Empty<GameServiceClient.CosmeticEntry>();
+        private readonly OverlayLoadState cosmeticCatalogLoad = new();
         private int page;
         private const float PanelWidth = 218f;
         private const float PanelHeight = 384f;
@@ -28,11 +29,7 @@ namespace BumperTanks.Gameplay
             ApplyColor();
             ApplyTrail();
             player?.GetComponent<TankCosmeticView>()?.Configure(profile.FlagId, profile.BumpSoundId);
-            GameServiceClient.Instance?.FetchCosmeticCatalog(items =>
-            {
-                cosmeticCatalog = items ?? System.Array.Empty<GameServiceClient.CosmeticEntry>();
-                if (open && page == 1) ShowAccessibleScreen();
-            });
+            LoadCosmeticCatalog();
         }
 
         private void Update()
@@ -69,12 +66,26 @@ namespace BumperTanks.Gameplay
             else if (page == 1)
             {
                 GUI.Label(SafeFrame(left + 10, top + 24, controlWidth, 22, safe), "Tank flag");
+                var catalogReady = cosmeticCatalogLoad.HasCompleted;
+                GUI.enabled = catalogReady;
                 if (GUI.Button(SafeFrame(left + 10, top + 46, controlWidth, 44, safe), $"{FlagName(profile.FlagId)}  |  tap to change")) CycleFlag();
+                GUI.enabled = true;
                 DrawUnlockButton(left + 10, top + 94, controlWidth, "flag");
                 GUI.Label(SafeFrame(left + 10, top + 166, controlWidth, 22, safe), "Bump sound");
+                GUI.enabled = catalogReady;
                 if (GUI.Button(SafeFrame(left + 10, top + 188, controlWidth, 44, safe), $"{SoundName(profile.BumpSoundId)}  |  tap to change")) CycleSound();
+                GUI.enabled = true;
                 DrawUnlockButton(left + 10, top + 236, controlWidth, "sound");
-                if (!string.IsNullOrEmpty(cosmeticsMessage)) GUI.Label(SafeFrame(left + 10, top + 284, controlWidth, 22, safe), cosmeticsMessage);
+                var catalogStatus = CosmeticCatalogStatusText();
+                if (!string.IsNullOrEmpty(catalogStatus))
+                {
+                    GUI.Label(SafeFrame(left + 10, top + 278, controlWidth, 22, safe), catalogStatus);
+                    if (cosmeticCatalogLoad.Status == OverlayLoadStatus.Failed &&
+                        GUI.Button(SafeFrame(left + 10, top + 300, controlWidth, 28, safe), "Retry catalog"))
+                        LoadCosmeticCatalog();
+                }
+                else if (!string.IsNullOrEmpty(cosmeticsMessage))
+                    GUI.Label(SafeFrame(left + 10, top + 284, controlWidth, 22, safe), cosmeticsMessage);
             }
             else
             {
@@ -115,10 +126,12 @@ namespace BumperTanks.Gameplay
             }
             else if (page == 1)
             {
-                actions.Add(new AccessibleUiAction($"Flag, currently {FlagName(profile.FlagId)}", "Activate to cycle through unlocked flags.", SafeFrame(left + 10, top + 46, width, 44, safe), CycleFlag));
+                actions.Add(new AccessibleUiAction($"Flag, currently {FlagName(profile.FlagId)}", "Activate to cycle through unlocked flags.", SafeFrame(left + 10, top + 46, width, 44, safe), CycleFlag, cosmeticCatalogLoad.HasCompleted));
                 actions.Add(UnlockAction(left + 10, top + 94, width, safe, "flag"));
-                actions.Add(new AccessibleUiAction($"Bump sound, currently {SoundName(profile.BumpSoundId)}", "Activate to cycle through unlocked bump sounds.", SafeFrame(left + 10, top + 188, width, 44, safe), CycleSound));
+                actions.Add(new AccessibleUiAction($"Bump sound, currently {SoundName(profile.BumpSoundId)}", "Activate to cycle through unlocked bump sounds.", SafeFrame(left + 10, top + 188, width, 44, safe), CycleSound, cosmeticCatalogLoad.HasCompleted));
                 actions.Add(UnlockAction(left + 10, top + 236, width, safe, "sound"));
+                if (cosmeticCatalogLoad.Status == OverlayLoadStatus.Failed)
+                    actions.Add(new AccessibleUiAction("Retry cosmetic catalog", "Try loading available flags and bump sounds again.", SafeFrame(left + 10, top + 278, width, 44, safe), LoadCosmeticCatalog));
             }
             else
             {
@@ -129,7 +142,9 @@ namespace BumperTanks.Gameplay
             actions.Add(new AccessibleUiAction("Previous garage page", "Show the previous garage category.", SafeFrame(left + 10, top + 332, 44, 44, safe), PreviousPage));
             actions.Add(new AccessibleUiAction("Back to main menu", "Close the garage and return to the main menu.", SafeFrame(left + 64, top + 332, 90, 44, safe), ReturnToMenu));
             actions.Add(new AccessibleUiAction("Next garage page", "Show the next garage category.", SafeFrame(left + 164, top + 332, 44, 44, safe), NextPage));
-            AccessibleUiBridge.Instance?.ShowScreen($"Garage. {PageName(page)}.", actions.ToArray());
+            var loadAnnouncement = page == 1 ? CosmeticCatalogStatusText() : string.Empty;
+            AccessibleUiBridge.Instance?.ShowScreen($"Garage. {PageName(page)}." +
+                (string.IsNullOrEmpty(loadAnnouncement) ? string.Empty : $" {loadAnnouncement}"), actions.ToArray());
         }
 
         private void PreviousPage() { page = (page + 2) % 3; cosmeticsMessage = string.Empty; ShowAccessibleScreen(); }
@@ -162,7 +177,7 @@ namespace BumperTanks.Gameplay
         private void DrawUnlockButton(float x, float y, float width, string category)
         {
             var item = NextLockedItem(category);
-            var label = cosmeticPurchasePending ? "Purchasing..." : item == null ? $"All {category}s unlocked" : $"Unlock {ItemName(item.id)} ({item.price} coins)";
+            var label = cosmeticPurchasePending ? "Purchasing..." : item == null ? NoLockedItemLabel(category) : $"Unlock {ItemName(item.id)} ({item.price} coins)";
             var wasEnabled = GUI.enabled;
             GUI.enabled = wasEnabled && !cosmeticPurchasePending && item != null;
             if (GUI.Button(SafeFrame(x, y, width, 44, GuiSafeAreaLayout.Current), label)) Purchase(item);
@@ -173,16 +188,68 @@ namespace BumperTanks.Gameplay
         {
             var item = NextLockedItem(category);
             if (item == null)
-                return new AccessibleUiAction($"All {category}s unlocked", $"All available {category} cosmetics are unlocked.", SafeFrame(x, y, width, 44, safe), null, false);
+                return new AccessibleUiAction(NoLockedItemLabel(category), NoLockedItemHint(category), SafeFrame(x, y, width, 44, safe), null, false);
             var label = cosmeticPurchasePending ? "Cosmetic purchase pending" : $"Unlock {ItemName(item.id)} for {item.price} Battle Coins";
             return new AccessibleUiAction(label, "Purchase this cosmetic with Battle Coins earned in matches or daily rewards.", SafeFrame(x, y, width, 44, safe), () => Purchase(item));
         }
 
         private GameServiceClient.CosmeticEntry NextLockedItem(string category)
         {
+            if (!cosmeticCatalogLoad.HasCompleted) return null;
             foreach (var item in cosmeticCatalog)
                 if (item.category == category && !IsOwned(item.id)) return item;
             return null;
+        }
+
+        private string CosmeticCatalogStatusText() => cosmeticCatalogLoad.Status switch
+        {
+            OverlayLoadStatus.Loading => "Loading catalog…",
+            OverlayLoadStatus.Failed => "Catalog unavailable.",
+            OverlayLoadStatus.Empty => "No unlocks available.",
+            _ => string.Empty
+        };
+
+        private string NoLockedItemLabel(string category) => cosmeticCatalogLoad.Status switch
+        {
+            OverlayLoadStatus.Empty => $"No {category} unlocks available",
+            OverlayLoadStatus.Loading => "Loading cosmetic catalog...",
+            OverlayLoadStatus.Failed => "Catalog unavailable",
+            _ => $"All {category}s unlocked"
+        };
+
+        private string NoLockedItemHint(string category) => cosmeticCatalogLoad.Status switch
+        {
+            OverlayLoadStatus.Empty => $"The catalog has no {category} cosmetics to unlock.",
+            OverlayLoadStatus.Loading => "The cosmetic catalog is loading.",
+            OverlayLoadStatus.Failed => "The cosmetic catalog could not be loaded. Use Retry cosmetic catalog to try again.",
+            _ => $"All available {category} cosmetics are unlocked."
+        };
+
+        private void LoadCosmeticCatalog()
+        {
+            if (cosmeticCatalogLoad.IsLoading) return;
+            cosmeticCatalogLoad.Begin();
+            cosmeticsMessage = string.Empty;
+            var service = GameServiceClient.Instance;
+            if (service == null)
+            {
+                cosmeticCatalogLoad.Fail("Online cosmetic catalog is unavailable.");
+                if (open && page == 1) ShowAccessibleScreen();
+                return;
+            }
+
+            ShowAccessibleScreen();
+            service.FetchCosmeticCatalog(items =>
+            {
+                cosmeticCatalog = items ?? System.Array.Empty<GameServiceClient.CosmeticEntry>();
+                cosmeticCatalogLoad.Complete(cosmeticCatalog.Length == 0);
+                cosmeticsMessage = string.Empty;
+                if (open && page == 1) ShowAccessibleScreen();
+            }, error =>
+            {
+                cosmeticCatalogLoad.Fail(error);
+                if (open && page == 1) ShowAccessibleScreen();
+            });
         }
 
         private bool IsOwned(string cosmeticId) =>
