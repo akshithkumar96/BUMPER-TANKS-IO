@@ -570,25 +570,42 @@ public sealed class RealtimeMatchHub : IDisposable
                         ResolveMatchEnd(matchElapsed);
                         if (finished && !matchReceiptsIssued)
                         {
-                            matchReceiptsIssued = true;
+                            var persistedForAllParticipants = true;
                             foreach (var participant in realParticipants.Values)
                             {
-                                profiles.TryCompleteMatch(participant.ExternalId, RoomId, participant.Gems,
-                                    participant.Eliminations, out var profile, out var award);
-                                if (participant.Connection is not null)
+                                PlayerProfile profile;
+                                int award;
+                                try
                                 {
-                                    matchReceipts.Add((participant.Connection, new
+                                    profiles.TryCompleteMatch(participant.ExternalId, RoomId, participant.Gems,
+                                        participant.Eliminations, out profile, out _);
+                                    // The match ID makes this operation idempotent. On a retry after a
+                                    // transient storage error, the repository may report an already
+                                    // completed match with award 0, so derive the immutable award from
+                                    // the finalized match totals for the receipt.
+                                    award = (int)Math.Min(200L, (long)participant.Gems + (long)participant.Eliminations * 10);
+                                    if (participant.Connection is not null)
                                     {
-                                        type = "match_result",
-                                        matchId = RoomId,
-                                        playerId = participant.ExternalId,
-                                        gems = participant.Gems,
-                                        eliminations = participant.Eliminations,
-                                        award,
-                                        profile
-                                    }));
+                                        matchReceipts.Add((participant.Connection, new
+                                        {
+                                            type = "match_result",
+                                            matchId = RoomId,
+                                            playerId = participant.ExternalId,
+                                            gems = participant.Gems,
+                                            eliminations = participant.Eliminations,
+                                            award,
+                                            profile
+                                        }));
+                                    }
+                                }
+                                catch (Exception exception)
+                                {
+                                    persistedForAllParticipants = false;
+                                    Console.Error.WriteLine($"Failed to persist result for player {participant.ExternalId} in match {RoomId}; retrying: {exception.Message}");
                                 }
                             }
+                            matchReceiptsIssued = persistedForAllParticipants;
+                            if (!matchReceiptsIssued) matchReceipts.Clear();
                         }
                         var phase = finished ? "finished" : GetPhase(matchElapsed);
                         var states = players.Values.Select(player => new
@@ -652,11 +669,12 @@ public sealed class RealtimeMatchHub : IDisposable
                     }
                     if (matchReceipts.Count > 0)
                         await Task.WhenAll(matchReceipts.Select(receipt => SendMatchReceiptSafelyAsync(receipt.Connection, receipt.Receipt, token)));
-                    if (finished)
+                    if (finished && matchReceiptsIssued)
                     {
                         retireFinishedRoom(RoomId);
                         return;
                     }
+                    if (finished) await Task.Delay(TimeSpan.FromSeconds(1), token);
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
