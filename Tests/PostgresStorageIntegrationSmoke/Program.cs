@@ -111,7 +111,13 @@ if (acceptedCallbacks.Length != 1 || acceptedCallbacks[0].Award is not (25 or 50
 var finalProfile = second.Profiles.GetOrCreate(playerId);
 if (finalProfile.MatchesPlayed != 1 || !finalProfile.OwnedCosmetics.Contains("flag_checkered", StringComparer.Ordinal))
     throw new InvalidOperationException("Concurrent database transactions lost profile state.");
-var dailyAward = finalProfile.BattleCoins - 500 - acceptedCallbacks[0].Award + 20 - 17;
+// The final balance includes the base match award, its one-time rewarded doubling,
+// the cosmetic purchase, and the independent rewarded spin in addition to the daily claim.
+const int baseMatchAward = 17;
+const int matchBonusAward = 17;
+const int cosmeticPrice = 20;
+var dailyAward = finalProfile.BattleCoins - initial.BattleCoins - acceptedCallbacks[0].Award -
+    baseMatchAward - matchBonusAward + cosmeticPrice;
 if (dailyAward is not (25 or 50 or 75 or 100))
     throw new InvalidOperationException("Daily and match awards were not persisted atomically.");
 
