@@ -527,6 +527,7 @@ public sealed class RealtimeMatchHub : IDisposable
         private async Task RunLoopAsync()
         {
             var token = stop.Token;
+            var finishedPersistenceRetryDelaySeconds = 0;
             try
             {
                 while (!token.IsCancellationRequested)
@@ -608,6 +609,10 @@ public sealed class RealtimeMatchHub : IDisposable
                             }
                             matchReceiptsIssued = persistedForAllParticipants;
                             if (!matchReceiptsIssued) matchReceipts.Clear();
+                            if (persistedForAllParticipants)
+                                finishedPersistenceRetryDelaySeconds = 0;
+                            else
+                                finishedPersistenceRetryDelaySeconds = Math.Min(30, Math.Max(1, finishedPersistenceRetryDelaySeconds * 2));
                         }
                         var phase = finished ? "finished" : GetPhase(matchElapsed);
                         var states = players.Values.Select(player => new
@@ -679,7 +684,7 @@ public sealed class RealtimeMatchHub : IDisposable
                         retireFinishedRoom(RoomId);
                         return;
                     }
-                    if (finished) await Task.Delay(TimeSpan.FromSeconds(1), token);
+                    if (finished) await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, finishedPersistenceRetryDelaySeconds)), token);
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
